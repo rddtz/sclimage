@@ -9,6 +9,7 @@
 
 #include <readline/readline.h> // Library to CLI
 #include <readline/history.h> // <-----'
+#include <getopt.h> //  <-----------'
 
 #define MAX_LINE_LEN 256
 #define MAX_ARGS 16
@@ -31,12 +32,17 @@ typedef struct image{
   char filename[MAX_FILENAME_LEN];
 } Image;
 
+int handle_help(Image* image, int argc, char* argv[]);
 int handle_vflip(Image* image, int argc, char* argv[]);
 int handle_hflip(Image* image, int argc, char* argv[]);
 int handle_show(Image* image, int argc, char* argv[]);
 int handle_load(Image* image, int argc, char* argv[]);
 int handle_grayscale(Image* image, int argc, char* argv[]);
+int handle_restart(Image* image, int argc, char* argv[]);
+int handle_quantization(Image* image, int argc, char* argv[]);
 int handle_exit(Image* image, int argc, char* argv[]);
+
+int is_grayscale(Image* image);
 
 // --- The struct that pairs a command name with a function pointer ---
 typedef struct command {
@@ -46,15 +52,15 @@ typedef struct command {
 } Command;
 
 Command command_table[] = {
-  //    {"help", handle_help},
+  {"help", handle_help},
   {"load", handle_load},
+  {"open", handle_load},
   {"grayscale", handle_grayscale},
+  {"restart", handle_restart},
+  {"quantization", handle_quantization},
   {"show", handle_show}, //,
   {"hflip", handle_hflip},
   {"vflip", handle_vflip},
-  // Save
-  // vflip
-  // hflip
   {"quit", handle_exit},
   {"exit", handle_exit}
 };
@@ -94,7 +100,7 @@ char** smart_completer(const char* text, int start, int end) {
     char* command = strtok(line_copy, " ");
 
     // Check if the command is one that takes a filename.
-    if (command && strcmp(command, "load") == 0) {
+    if (command && (strcmp(command, "load") == 0 || strcmp(command, "open") == 0)) {
         free(line_copy);
         // Use readline's built-in filename completer.
         return rl_completion_matches(text, rl_filename_completion_function);
@@ -191,6 +197,20 @@ int main(int argc, char** argv) {
     return 0;
 }
 
+int handle_help(Image* img, int argc, char* argv[]) {
+    printf("Available commands:\n"
+           "  load <filepath>          - Loads an image from a path.\n"
+	   "  open <filepath>          - Same as load.\n"
+           "  grayscale                - Applies a grayscale filter.\n"
+	   "  quantization <shades>    - Quantizes the image to only use <shades> colors.\n"
+	   "  hflip                    - Flips the image horizontally.\n"
+	   "  vflip                    - Flips the image vertically.\n"
+           "  exit                     - Exits the shell.\n"
+	   "  quit                     - Same as exit.\n"
+           "  help                     - Shows this help message.\n");
+
+    return 0;
+}
 
 int handle_vflip(Image* image, int argc, char* argv[]){
 
@@ -247,10 +267,30 @@ int handle_hflip(Image* image, int argc, char* argv[]){
   return 0;
 }
 
+int is_grayscale(Image* image){
+
+  SDL_Surface* surface = image->surface;
+  Uint32* pixels = (Uint32*)surface->pixels;
+  int pixel_count = surface->w * surface->h;
+
+  for (int i = 0; i < pixel_count; i++) {
+    // GET THE PIXEL and its individual color components
+    Uint32 pixel = pixels[i];
+    Uint8 r, g, b, a;
+    SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
+
+    printf("(%d, %d, %d)", r, g, b);
+    if(r != b || r != g || b != g){
+      return 0;
+    }
+  }
+
+  return 1; // is gray scale
+}
+
 int handle_grayscale(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
-
   SDL_LockSurface(surface);
   // Get a pointer to the pixel data and cast it to the format we need.
 
@@ -274,6 +314,63 @@ int handle_grayscale(Image* image, int argc, char* argv[]){
   }
 
   SDL_UnlockSurface(surface);
+
+  return 0;
+}
+
+
+int handle_restart(Image* image, int argc, char* argv[]){
+
+
+  Uint32* pixels_edited = (Uint32*)image->surface->pixels;
+  Uint32* pixels_original = (Uint32*)image->original->pixels;
+  int pixel_count = image->surface->w * image->surface->h;
+  memcpy(pixels_edited, pixels_original, sizeof(Uint32)*pixel_count);
+
+  return 0;
+}
+
+int handle_quantization(Image* image, int argc, char* argv[]){
+
+  SDL_Surface* surface = image->surface;
+
+  if(!is_grayscale(image)){
+    handle_grayscale(image, 0, NULL);
+  }
+
+  SDL_LockSurface(surface);
+
+  /* int shades = atoi(argv[1]); // first and only argument is the new amount of shades of the image */
+  /* int tmax = 255; */
+  /* int tmin = 0; */
+
+  /* if(shades >= 255){ */
+  /*   return 0; */
+  /* } */
+
+  /* float bin_size = (float) (tmax - tmin)/shades; */
+
+
+  /* Uint32* pixels = (Uint32*)surface->pixels; */
+  /* int pixel_count = surface->w * surface->h; */
+
+  /* for (int i = 0; i < pixel_count; ++i) { */
+  /*   // GET THE PIXEL and its individual color components */
+  /*   Uint32 pixel = pixels[i]; */
+  /*   Uint8 r, g, b, a; */
+  /*   SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a); */
+
+  /*   // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula) */
+  /*   Uint8 gray = (Uint8)(0.299 * r + 0.587 * g + 0.114 * b); */
+  /*   r = gray; */
+  /*   g = gray; */
+  /*   b = gray; */
+
+  /*   // WRITE THE NEW PIXEL back to the surface */
+  /*   pixels[i] = SDL_MapRGBA(surface->format, r, g, b, a); */
+  /* } */
+
+  /* SDL_UnlockSurface(surface); */
 
   return 0;
 }
@@ -322,44 +419,49 @@ int handle_load(Image* image, int argc, char* argv[]){
 }
 
 
+
 int handle_show(Image* image, int argc, char* argv[]){
 
-  SDL_Surface* surface = image->surface;
-  SDL_Surface* original = image->original;
+  SDL_Surface* original = NULL;
+  SDL_Surface* surface = NULL;
 
+  original = image->original;
+  if(original == NULL){
+    printf("Error: showing null image, try loading an image first.\n");
+    return 0;
+  }
+
+  surface = image->surface;
   if(surface == NULL){
     printf("Error: showing null image, try loading an image first.\n");
     return 0;
   }
 
+
   SDL_Window* window = SDL_CreateWindow("Original and Edited View", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-					surface->w + original->w, max(surface->h, original->h),
-					SDL_WINDOW_SHOWN);
-
-
-  /* SDL_Window* window = SDL_CreateWindow("Edited View", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, */
-  /* 					surface->w, surface->h, */
-  /* 					SDL_WINDOW_SHOWN); */
-
+			    surface->w + original->w, max(surface->h, original->h),
+			    SDL_WINDOW_SHOWN);
 
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-  SDL_Texture* texture_original = SDL_CreateTextureFromSurface(renderer, original);
-  SDL_Texture* texture_edited = SDL_CreateTextureFromSurface(renderer, surface);
-
-  // Rectangle for the original image (left side)
   SDL_Rect original_dest_rect;
+  SDL_Rect edited_dest_rect;
+
+  SDL_Texture* texture_original = NULL;
+  SDL_Texture* texture_edited = NULL;
+
+  texture_original = SDL_CreateTextureFromSurface(renderer, original);
+  // Rectangle for the original image (left side)
   original_dest_rect.x = 0;
   original_dest_rect.y = 0;
   original_dest_rect.w = original->w; // Use edited_surface w/h for consistency
   original_dest_rect.h = original->h;
 
+  texture_edited = SDL_CreateTextureFromSurface(renderer, surface);
   // Rectangle for the edited image (right side)
-  SDL_Rect edited_dest_rect;
   edited_dest_rect.x = original_dest_rect.w; // Position it right next to the original
   edited_dest_rect.y = 0;
   edited_dest_rect.w = surface->w;
   edited_dest_rect.h = surface->h;
-
 
   int quit = 0;
   SDL_Event event;
@@ -370,13 +472,17 @@ int handle_show(Image* image, int argc, char* argv[]){
     SDL_RenderClear(renderer);
 
     /* SDL_RenderCopy(renderer, texture_edited, NULL, NULL); */
+
     SDL_RenderCopy(renderer, texture_original, NULL, &original_dest_rect);
     SDL_RenderCopy(renderer, texture_edited, NULL, &edited_dest_rect);
     SDL_RenderPresent(renderer);
   }
 
+
   SDL_DestroyTexture(texture_original);
   SDL_DestroyTexture(texture_edited);
+
+
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
 
