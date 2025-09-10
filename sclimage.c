@@ -206,8 +206,9 @@ int handle_help(Image* img, int argc, char* argv[]) {
     printf("Available commands:\n"
            "  load <filepath>          - Loads an image from a path.\n"
 	   "  open <filepath>          - Same as load.\n"
-           "  grayscale                - Applies a grayscale filter.\n"
-	   "  quantization <shades>    - Quantizes the image to only use <shades> colors.\n"
+           "  grayscale                - Applies the grayscale filter to image.\n"
+	   "  quantization <shades>    - Quantizes the image to only use <shades> shades.\n"
+	   "  negative                 - Applies the negative filter to the image.\n"
 	   "  hflip                    - Flips the image horizontally.\n"
 	   "  vflip                    - Flips the image vertically.\n"
            "  exit                     - Exits the shell.\n"
@@ -405,7 +406,7 @@ int handle_quantization(Image* image, int argc, char* argv[]){
 
   SDL_LockSurface(surface);
 
-  float bin_size = (float) (255 - 0 + 1)/shades;
+  float bin_size = (float) (tmax - tmin + 1)/shades;
 
   Uint8 max_bin = bin_size * shades;
 
@@ -420,8 +421,8 @@ int handle_quantization(Image* image, int argc, char* argv[]){
     SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
 
     // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
-    int f = floor(r/bin_size);
-    Uint16 new_shade = (Uint16) f * bin_size + bin_size/2;
+    int f = min(floor(r/bin_size), shades - 1);
+    Uint16 new_shade = tmin + (Uint16) f * bin_size + bin_size/2;
     printf("%d -> %d; r/bin = %d; max_bin = %d\n", r, new_shade, f, max_bin);
     r = (Uint8)new_shade;
     g = (Uint8)new_shade;
