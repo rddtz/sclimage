@@ -408,9 +408,6 @@ int handle_quantization(Image* image, int argc, char* argv[]){
 
   float bin_size = (float) (tmax - tmin + 1)/shades;
 
-  Uint8 max_bin = bin_size * shades;
-
-
   int new_histogram[GRAYSCALE_RANGE*2] = {0};
   int new_shades = 0;
 
@@ -420,12 +417,16 @@ int handle_quantization(Image* image, int argc, char* argv[]){
     Uint8 r, g, b, a;
     SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
 
-    // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
-    int f = min(floor(r/bin_size), shades - 1);
+    // MANIPULATE THE PIXEL (convert to grayscale using luminosity
+    /* printf("%d and %f, r/binsize = %f, (r-mi)/binsize = %f\n, ", r, bin_size, r/bin_size, (r-tmin)/bin_size); */
+    int f = (int)floor((float)(r-tmin)/bin_size);
     Uint16 new_shade = tmin + (Uint16) f * bin_size + bin_size/2;
+    printf("%d -> %d\n", r, new_shade);
     r = (Uint8)new_shade;
     g = (Uint8)new_shade;
     b = (Uint8)new_shade;
+
+
 
     // WRITE THE NEW PIXEL back to the surface
     pixels[i] = SDL_MapRGBA(surface->format, r, g, b, a);
