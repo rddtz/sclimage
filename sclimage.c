@@ -423,7 +423,6 @@ int handle_quantization(Image* image, int argc, char* argv[]){
     // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
     int f = min(floor(r/bin_size), shades - 1);
     Uint16 new_shade = tmin + (Uint16) f * bin_size + bin_size/2;
-    printf("%d -> %d; r/bin = %d; max_bin = %d\n", r, new_shade, f, max_bin);
     r = (Uint8)new_shade;
     g = (Uint8)new_shade;
     b = (Uint8)new_shade;
@@ -437,20 +436,10 @@ int handle_quantization(Image* image, int argc, char* argv[]){
 
   }
 
-
-  for (int i = 0; i < GRAYSCALE_RANGE*2; i++) {
-    // GET THE PIXEL and its individual color components
-
-    if(new_histogram[i] != 0){
-      printf("%d\n", i);
-    }
+  if(new_shades != shades){
+    printf("Error: an error occurred while quantizating the image\n");
+    return -1;
   }
-
-  printf("bin_size: %f; tmin = %d; tmax = %d\n", bin_size, tmin, tmax);
-  printf("from %d shades to %d shades\n", image_shades, new_shades);
-  SDL_UnlockSurface(surface);
-
-
 
   return 0;
 }
