@@ -363,7 +363,6 @@ int handle_quantization(Image* image, int argc, char* argv[]){
       image_shades++;
     }
     histogram[r]++;
-
   }
 
   if(shades >= image_shades){
@@ -372,16 +371,17 @@ int handle_quantization(Image* image, int argc, char* argv[]){
 
   SDL_LockSurface(surface);
 
-  float bin_size = (float) (tmax - tmin)/shades;
+  float bin_size = (float) (tmax - tmin + 1)/shades;
 
-  for (int i = 0; i < pixel_count; ++i) {
+  for (int i = 0; i < pixel_count; i++) {
     // GET THE PIXEL and its individual color components
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
     SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
 
     // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
-    Uint8 new_shade = (Uint8) ceil(r/bin_size) * bin_size + bin_size/2;
+    Uint8 new_shade = (Uint8) floor(r/bin_size) * bin_size + bin_size/2;
+    printf("%d -> %d\n", r, new_shade);
     r = new_shade;
     g = new_shade;
     b = new_shade;
