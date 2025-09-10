@@ -15,6 +15,7 @@
 #define MAX_ARGS 16
 #define MAX_FILENAME_LEN 128
 #define MAX_IMAGE_WIDTH 100000
+#define GRAYSCALE_RANGE 256
 
 #define max(a,b)				\
 ({ __typeof__ (a) _a = (a);			\
@@ -279,7 +280,6 @@ int is_grayscale(Image* image){
     Uint8 r, g, b, a;
     SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
 
-    printf("(%d, %d, %d)", r, g, b);
     if(r != b || r != g || b != g){
       return 0;
     }
@@ -335,42 +335,62 @@ int handle_quantization(Image* image, int argc, char* argv[]){
   SDL_Surface* surface = image->surface;
 
   if(!is_grayscale(image)){
+    printf("Quantization only works for images in grayscale (at the moment). The image will be converted to grayscale before contining.\n");
     handle_grayscale(image, 0, NULL);
+  }
+
+
+  Uint32* pixels = (Uint32*)surface->pixels;
+  int pixel_count = surface->w * surface->h;
+
+
+  int shades = atoi(argv[1]); // first and only argument is the new amount of shades of the image
+  int tmax = -1;
+  int tmin = 256;
+  int image_shades = 0;
+  int histogram[GRAYSCALE_RANGE] = {0};
+
+  for (int i = 0; i < pixel_count; ++i) {
+    // GET THE PIXEL and its individual color components
+    Uint32 pixel = pixels[i];
+    Uint8 r, g, b, a;
+    SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
+
+    if(r > tmax) tmax = r;
+    if(r < tmin) tmin = r;
+
+    if(histogram[r] == 0){
+      image_shades++;
+    }
+    histogram[r]++;
+
+  }
+
+  if(shades >= image_shades){
+    return 0;
   }
 
   SDL_LockSurface(surface);
 
-  /* int shades = atoi(argv[1]); // first and only argument is the new amount of shades of the image */
-  /* int tmax = 255; */
-  /* int tmin = 0; */
+  float bin_size = (float) (tmax - tmin)/shades;
 
-  /* if(shades >= 255){ */
-  /*   return 0; */
-  /* } */
+  for (int i = 0; i < pixel_count; ++i) {
+    // GET THE PIXEL and its individual color components
+    Uint32 pixel = pixels[i];
+    Uint8 r, g, b, a;
+    SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
 
-  /* float bin_size = (float) (tmax - tmin)/shades; */
+    // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
+    Uint8 new_shade = (Uint8) ceil(r/bin_size) * bin_size + bin_size/2;
+    r = new_shade;
+    g = new_shade;
+    b = new_shade;
 
+    // WRITE THE NEW PIXEL back to the surface
+    pixels[i] = SDL_MapRGBA(surface->format, r, g, b, a);
+  }
 
-  /* Uint32* pixels = (Uint32*)surface->pixels; */
-  /* int pixel_count = surface->w * surface->h; */
-
-  /* for (int i = 0; i < pixel_count; ++i) { */
-  /*   // GET THE PIXEL and its individual color components */
-  /*   Uint32 pixel = pixels[i]; */
-  /*   Uint8 r, g, b, a; */
-  /*   SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a); */
-
-  /*   // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula) */
-  /*   Uint8 gray = (Uint8)(0.299 * r + 0.587 * g + 0.114 * b); */
-  /*   r = gray; */
-  /*   g = gray; */
-  /*   b = gray; */
-
-  /*   // WRITE THE NEW PIXEL back to the surface */
-  /*   pixels[i] = SDL_MapRGBA(surface->format, r, g, b, a); */
-  /* } */
-
-  /* SDL_UnlockSurface(surface); */
+  SDL_UnlockSurface(surface);
 
   return 0;
 }
