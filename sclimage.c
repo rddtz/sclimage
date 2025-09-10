@@ -38,6 +38,7 @@ int handle_vflip(Image* image, int argc, char* argv[]);
 int handle_hflip(Image* image, int argc, char* argv[]);
 int handle_show(Image* image, int argc, char* argv[]);
 int handle_load(Image* image, int argc, char* argv[]);
+int handle_save(Image* image, int argc, char* argv[]);
 int handle_grayscale(Image* image, int argc, char* argv[]);
 int handle_restart(Image* image, int argc, char* argv[]);
 int handle_quantization(Image* image, int argc, char* argv[]);
@@ -56,6 +57,7 @@ Command command_table[] = {
   {"help", handle_help},
   {"load", handle_load},
   {"open", handle_load},
+  {"save", handle_save},
   {"grayscale", handle_grayscale},
   {"restart", handle_restart},
   {"quantization", handle_quantization},
@@ -371,7 +373,13 @@ int handle_quantization(Image* image, int argc, char* argv[]){
 
   SDL_LockSurface(surface);
 
-  float bin_size = (float) (tmax - tmin + 1)/shades;
+  float bin_size = (float) (tmax - tmin + 1)/(max(shades, 0));
+
+  Uint8 max_bin = bin_size * shades;
+
+
+  int new_histogram[GRAYSCALE_RANGE*2] = {0};
+  int new_shades = 0;
 
   for (int i = 0; i < pixel_count; i++) {
     // GET THE PIXEL and its individual color components
@@ -380,14 +388,19 @@ int handle_quantization(Image* image, int argc, char* argv[]){
     SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
 
     // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
-    Uint8 new_shade = (Uint8) floor(r/bin_size) * bin_size + bin_size/2;
-    printf("%d -> %d\n", r, new_shade);
-    r = new_shade;
-    g = new_shade;
-    b = new_shade;
+    int f = floor(r/bin_size);
+    Uint8 new_shade = (Uint8) f * bin_size + bin_size/2;
+    r = (Uint8)new_shade;
+    g = (Uint8)new_shade;
+    b = (Uint8)new_shade;
 
     // WRITE THE NEW PIXEL back to the surface
     pixels[i] = SDL_MapRGBA(surface->format, r, g, b, a);
+    if(new_histogram[new_shade] == 0){
+      new_shades++;
+    }
+    new_histogram[new_shade]++;
+
   }
 
   SDL_UnlockSurface(surface);
@@ -434,6 +447,34 @@ int handle_load(Image* image, int argc, char* argv[]){
 
   strncpy(image->filename, argv[1], MAX_FILENAME_LEN - 1);
   image->filename[strlen(image->filename) - 1] = '\0'; // Ensure null-termination
+
+  return 0;
+}
+
+
+int handle_save(Image* image, int argc, char* argv[]){
+
+  char name[MAX_FILENAME_LEN] = "";
+  int quality = 100;
+
+  if(argc > 1){
+    strcpy(name, argv[1]);
+  } else {
+    strcpy(name, image->filename);
+  }
+
+  // Free previous surface
+  if(image->surface == NULL){
+    printf("Error: tried to save null image, try loading an image first.\n");
+    return 0;
+  }
+
+  printf("Saving as %s\n", name);
+
+  if( IMG_SaveJPG(image->surface, name, quality) ){
+    fprintf(stderr, "Error: problem when saving image (%s)\n", IMG_GetError());
+    return -1;
+  }
 
   return 0;
 }
