@@ -1,4 +1,4 @@
-// See why last (and first) pixel is not chaning
+// Change how to acess pixel data
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +46,41 @@ int handle_quantization(Image* image, int argc, char* argv[]);
 int handle_exit(Image* image, int argc, char* argv[]);
 
 int is_grayscale(Image* image);
+
+void getRBGA(Uint32 pixel, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 *a){
+
+  Uint8 mask = 0xFF;
+  *r = (pixel & mask);
+
+  pixel = pixel >> 8;
+  *g = pixel & mask;
+
+  pixel = pixel >> 8;
+  *b = pixel & mask;
+
+  pixel = pixel >> 8;
+  *a = pixel & mask;
+
+  return;
+}
+
+Uint32 setRGBA(Uint8 r, Uint8 g, Uint8 b, Uint8 a){
+
+  Uint32 my_pixel = 0x00000000;
+
+  my_pixel += a;
+
+  my_pixel = my_pixel << 8;
+  my_pixel = my_pixel + b;
+
+  my_pixel = my_pixel << 8;
+  my_pixel += g;
+
+  my_pixel = my_pixel << 8;
+  my_pixel += r;
+
+  return my_pixel;
+}
 
 // --- The struct that pairs a command name with a function pointer ---
 typedef struct command {
@@ -283,8 +318,8 @@ int is_grayscale(Image* image){
     // GET THE PIXEL and its individual color components
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
-    SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
 
+    getRBGA(pixel, &r, &g, &b, &a);
     if(r != b || r != g || b != g){
       return 0;
     }
@@ -307,7 +342,8 @@ int handle_negative(Image* image, int argc, char* argv[]){
     // GET THE PIXEL and its individual color components
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
-    SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
+
+    getRBGA(pixel, &r, &g, &b, &a);
 
     // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
     r = 255 - r;
@@ -315,7 +351,8 @@ int handle_negative(Image* image, int argc, char* argv[]){
     b = 255 - b;
 
     // WRITE THE NEW PIXEL back to the surface
-    pixels[i] = SDL_MapRGBA(surface->format, r, g, b, a);
+
+    pixels[i] = setRGBA(r, g, b, a);
   }
 
   SDL_UnlockSurface(surface);
@@ -336,7 +373,9 @@ int handle_grayscale(Image* image, int argc, char* argv[]){
     // GET THE PIXEL and its individual color components
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
-    SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
+
+
+    getRBGA(pixel, &r, &g, &b, &a);
 
     // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
     Uint8 gray = (Uint8)(0.299 * r + 0.587 * g + 0.114 * b);
@@ -345,7 +384,8 @@ int handle_grayscale(Image* image, int argc, char* argv[]){
     b = gray;
 
     // WRITE THE NEW PIXEL back to the surface
-    pixels[i] = SDL_MapRGBA(surface->format, r, g, b, a);
+    pixels[i] = setRGBA(r, g, b, a);
+
   }
 
   SDL_UnlockSurface(surface);
@@ -389,7 +429,7 @@ int handle_quantization(Image* image, int argc, char* argv[]){
     // GET THE PIXEL and its individual color components
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
-    SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
+    getRBGA(pixel, &r, &g, &b, &a);
 
     if(r > tmax) tmax = r;
     if(r < tmin) tmin = r;
@@ -415,21 +455,18 @@ int handle_quantization(Image* image, int argc, char* argv[]){
     // GET THE PIXEL and its individual color components
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
-    SDL_GetRGBA(pixel, surface->format, &r, &g, &b, &a);
+    getRBGA(pixel, &r, &g, &b, &a);
 
     // MANIPULATE THE PIXEL (convert to grayscale using luminosity
     /* printf("%d and %f, r/binsize = %f, (r-mi)/binsize = %f\n, ", r, bin_size, r/bin_size, (r-tmin)/bin_size); */
     int f = (int)floor((float)(r-tmin)/bin_size);
     Uint16 new_shade = tmin + (Uint16) f * bin_size + bin_size/2;
-    printf("%d -> %d\n", r, new_shade);
+
     r = (Uint8)new_shade;
     g = (Uint8)new_shade;
     b = (Uint8)new_shade;
 
-
-
-    // WRITE THE NEW PIXEL back to the surface
-    pixels[i] = SDL_MapRGBA(surface->format, r, g, b, a);
+    pixels[i] = setRGBA(r, g, b, a);
     if(new_histogram[new_shade] == 0){
       new_shades++;
     }
