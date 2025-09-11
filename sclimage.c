@@ -1,86 +1,19 @@
-// Change how to acess pixel data
+#include "sclimage.h"
+#include <pthread.h> // Include the threads library
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+// Signatures for the functions of the application
+int sclimage_help(Image* image, int argc, char* argv[]);
+int sclimage_vflip(Image* image, int argc, char* argv[]);
+int sclimage_hflip(Image* image, int argc, char* argv[]);
+int sclimage_show(Image* image, int argc, char* argv[]);
+int sclimage_load(Image* image, int argc, char* argv[]);
+int sclimage_save(Image* image, int argc, char* argv[]);
+int sclimage_grayscale(Image* image, int argc, char* argv[]);
+int sclimage_negative(Image* image, int argc, char* argv[]);
+int sclimage_restart(Image* image, int argc, char* argv[]);
+int sclimage_quantization(Image* image, int argc, char* argv[]);
+int sclimage_exit(Image* image, int argc, char* argv[]);
 
-#include <SDL2/SDL.h> // Library used to image handle
-#include <SDL2/SDL_image.h> // <-----'
-
-#include <readline/readline.h> // Library to CLI
-#include <readline/history.h> // <-----'
-#include <getopt.h> //  <-----------'
-
-#define MAX_LINE_LEN 256
-#define MAX_ARGS 16
-#define MAX_FILENAME_LEN 128
-#define MAX_IMAGE_WIDTH 100000
-#define GRAYSCALE_RANGE 256
-
-#define max(a,b)				\
-({ __typeof__ (a) _a = (a);			\
-__typeof__ (b) _b = (b);			\
-_a > _b ? _a : _b; })
-
-#define min(a,b)				\
-({ __typeof__ (a) _a = (a);			\
-__typeof__ (b) _b = (b);			\
-_a < _b ? _a : _b; })
-
-typedef struct image{
-  SDL_Surface* surface;
-  SDL_Surface* original;
-  char filename[MAX_FILENAME_LEN];
-} Image;
-
-int handle_help(Image* image, int argc, char* argv[]);
-int handle_vflip(Image* image, int argc, char* argv[]);
-int handle_hflip(Image* image, int argc, char* argv[]);
-int handle_show(Image* image, int argc, char* argv[]);
-int handle_load(Image* image, int argc, char* argv[]);
-int handle_save(Image* image, int argc, char* argv[]);
-int handle_grayscale(Image* image, int argc, char* argv[]);
-int handle_negative(Image* image, int argc, char* argv[]);
-int handle_restart(Image* image, int argc, char* argv[]);
-int handle_quantization(Image* image, int argc, char* argv[]);
-int handle_exit(Image* image, int argc, char* argv[]);
-
-int is_grayscale(Image* image);
-
-void getRBGA(Uint32 pixel, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 *a){
-
-  Uint8 mask = 0xFF;
-  *r = (pixel & mask);
-
-  pixel = pixel >> 8;
-  *g = pixel & mask;
-
-  pixel = pixel >> 8;
-  *b = pixel & mask;
-
-  pixel = pixel >> 8;
-  *a = pixel & mask;
-
-  return;
-}
-
-Uint32 setRGBA(Uint8 r, Uint8 g, Uint8 b, Uint8 a){
-
-  Uint32 my_pixel = 0x00000000;
-
-  my_pixel += a;
-
-  my_pixel = my_pixel << 8;
-  my_pixel = my_pixel + b;
-
-  my_pixel = my_pixel << 8;
-  my_pixel += g;
-
-  my_pixel = my_pixel << 8;
-  my_pixel += r;
-
-  return my_pixel;
-}
 
 // --- The struct that pairs a command name with a function pointer ---
 typedef struct command {
@@ -90,19 +23,19 @@ typedef struct command {
 } Command;
 
 Command command_table[] = {
-  {"help", handle_help},
-  {"load", handle_load},
-  {"open", handle_load},
-  {"save", handle_save},
-  {"grayscale", handle_grayscale},
-  {"negative", handle_negative},
-  {"restart", handle_restart},
-  {"quantization", handle_quantization},
-  {"show", handle_show}, //,
-  {"hflip", handle_hflip},
-  {"vflip", handle_vflip},
-  {"quit", handle_exit},
-  {"exit", handle_exit}
+  {"help", sclimage_help},
+  {"load", sclimage_load},
+  {"open", sclimage_load},
+  {"save", sclimage_save},
+  {"grayscale", sclimage_grayscale},
+  {"negative", sclimage_negative},
+  {"restart", sclimage_restart},
+  {"quantization", sclimage_quantization},
+  {"show", sclimage_show},
+  {"hflip", sclimage_hflip},
+  {"vflip", sclimage_vflip},
+  {"quit", sclimage_exit},
+  {"exit", sclimage_exit}
 };
 
 const int num_commands = sizeof(command_table) / sizeof(Command);
@@ -152,45 +85,41 @@ char** smart_completer(const char* text, int start, int end) {
 }
 
 
-
 int main(int argc, char** argv) {
 
     char* line;
     char* argv_int[MAX_ARGS];
     int argc_int = 0;
 
-    // --- 1. SETUP AND IMAGE LOADING ---
-    SDL_Init(SDL_INIT_VIDEO);
-    IMG_Init(IMG_INIT_PNG | IMG_INIT_JPG);
+    IMG_Init(IMG_INIT_JPG); // Set up image JPG loading
 
     printf("Welcome to the Simple Command Line Interface for Image Processing (SCLIMAGE)!\nType 'help' for commands.\n");
 
     rl_attempted_completion_function = smart_completer;
-    Image image = {NULL, NULL, ""}; // Image showned
+    Image image = {NULL, NULL, ""}; // This instance of Image represents the current image
 
+    // Read loop for command line interface
     while(1){
-
       line = readline("(sclimage) > ");
 
-      //fflush(stdout); // Ensure the prompt is displayed before reading input
-
-      // Read a line of input
-      if (!line) {
-	printf("exit\n"); // Handle Ctrl+D (EOF)
+      if (!line) { // this handles the EOF (Ctrl+D) signal and exits the program
+	printf("exit\n");
 	break;
       }
 
-      if (strlen(line) > 0) {
+      if (strlen(line) > 0) { // If the line isn't empty, add to history of commands
 	add_history(line);
       }
 
-      // Remove the trailing newline character from fgets
+      // Remove the \n from the input
       line[strcspn(line, "\n")] = 0;
 
+      // Copying the line to a new array that can be used to tokenize the arguments
       char line_copy[MAX_LINE_LEN];
       strncpy(line_copy, line, MAX_LINE_LEN - 1);
       line_copy[MAX_LINE_LEN - 1] = '\0';
 
+      // Tokenize the input, creating a argc and argv for each command
       argc_int = 0;
       char* token = strtok(line_copy, " \t");
       while (token != NULL && argc_int < MAX_ARGS - 1) {
@@ -199,19 +128,20 @@ int main(int argc, char** argv) {
       }
       argv_int[argc_int] = NULL;
 
-      if (argc_int == 0) {
+      if (argc_int == 0) { // If the line was empty (after tokenization), free and continue
 	free(line);
 	continue;
       }
 
-      // --- Find and execute the command ---
+      // Loop to match the input command with the available one
       int found_command = 0;
       for (int i = 0; i < num_commands; i++) {
 	if (strcmp(argv_int[0], command_table[i].name) == 0) {
-	  // Call the associated function pointer
 
+	  // If find, call the function
 	  int status = command_table[i].handler(&image, argc_int, argv_int);
 
+	  // Verify if an error happened when handling the command
 	  if(status != 0){
 	    exit(status);
 	  }
@@ -228,16 +158,16 @@ int main(int argc, char** argv) {
       free(line);
     }
 
-
+    // Freeing the image used and exiting the IMG enviroment
     SDL_FreeSurface(image.surface);
     SDL_FreeSurface(image.original);
     IMG_Quit();
-    SDL_Quit();
 
     return 0;
 }
 
-int handle_help(Image* img, int argc, char* argv[]) {
+
+int sclimage_help(Image* img, int argc, char* argv[]) {
     printf("Available commands:\n"
            "  load <filepath>          - Loads an image from a path.\n"
 	   "  open <filepath>          - Same as load.\n"
@@ -253,54 +183,47 @@ int handle_help(Image* img, int argc, char* argv[]) {
     return 0;
 }
 
-int handle_vflip(Image* image, int argc, char* argv[]){
+
+int sclimage_hflip(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
 
   SDL_LockSurface(surface);
+
   // Get a pointer to the pixel data and cast it to the format we need.
   Uint32* pixels = (Uint32*)surface->pixels;
 
-  //  int pixel_count = surface->w * surface->h;
   int ppl = surface->w; // pixels per line
-
   Uint32 temp = 0;
 
-  for (int i = 0; i < surface->h; i++) {
-    for(int j = 0; j < (surface->w)/2; j++){
-
-      //      printf("Trading pixel at position (%d, %d) with (%d, %d)\n", i, j, i, ppl - j);
+  for (int i = 0; i < surface->h; i++){
+    for(int j = 0; j < ppl/2; j++){
       temp = pixels[i*ppl + j];
       pixels[i*ppl + j] = pixels[i*ppl + ppl - j - 1];
       pixels[i*ppl + ppl - j - 1] = temp;
-
     }
   }
 
   SDL_UnlockSurface(surface);
-
   return 0;
 }
 
-int handle_hflip(Image* image, int argc, char* argv[]){
+
+int sclimage_vflip(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
 
   SDL_LockSurface(surface);
-  // Get a pointer to the pixel data and cast it to the format we need.
 
   Uint32* pixels = (Uint32*)surface->pixels;
-  //  int pixel_count = surface->w * surface->h;
 
   Uint32 hold_buffer[MAX_IMAGE_WIDTH] = {0};
-  int ppl = surface->w; // pixels per line
+  int ppl = surface->w;
 
   for (int i = 0; i < (surface->h)/2; i++) {
-
     memcpy(hold_buffer, pixels + i*ppl, sizeof(Uint32)*ppl);
     memcpy(pixels + i*ppl, pixels + ppl*(surface->h - 1) - i*ppl, sizeof(Uint32)*ppl);
     memcpy(pixels + ppl*(surface->h - 1) - i*ppl, hold_buffer, sizeof(Uint32)*ppl);
-
   }
 
   SDL_UnlockSurface(surface);
@@ -308,49 +231,24 @@ int handle_hflip(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-int is_grayscale(Image* image){
+
+int sclimage_negative(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
+  SDL_LockSurface(surface);
+
   Uint32* pixels = (Uint32*)surface->pixels;
   int pixel_count = surface->w * surface->h;
 
   for (int i = 0; i < pixel_count; i++) {
-    // GET THE PIXEL and its individual color components
+
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
-
-    getRBGA(pixel, &r, &g, &b, &a);
-    if(r != b || r != g || b != g){
-      return 0;
-    }
-  }
-
-  return 1; // is gray scale
-}
-
-
-int handle_negative(Image* image, int argc, char* argv[]){
-
-  SDL_Surface* surface = image->surface;
-  SDL_LockSurface(surface);
-  // Get a pointer to the pixel data and cast it to the format we need.
-
-  Uint32* pixels = (Uint32*)surface->pixels;
-  int pixel_count = surface->w * surface->h;
-
-  for (int i = 0; i < pixel_count; ++i) {
-    // GET THE PIXEL and its individual color components
-    Uint32 pixel = pixels[i];
-    Uint8 r, g, b, a;
-
     getRBGA(pixel, &r, &g, &b, &a);
 
-    // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
     r = 255 - r;
     g = 255 - g;
     b = 255 - b;
-
-    // WRITE THE NEW PIXEL back to the surface
 
     pixels[i] = setRGBA(r, g, b, a);
   }
@@ -360,32 +258,27 @@ int handle_negative(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-int handle_grayscale(Image* image, int argc, char* argv[]){
+int sclimage_grayscale(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
   SDL_LockSurface(surface);
-  // Get a pointer to the pixel data and cast it to the format we need.
 
   Uint32* pixels = (Uint32*)surface->pixels;
   int pixel_count = surface->w * surface->h;
 
-  for (int i = 0; i < pixel_count; ++i) {
-    // GET THE PIXEL and its individual color components
+  for (int i = 0; i < pixel_count; i++) {
+
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
 
-
     getRBGA(pixel, &r, &g, &b, &a);
 
-    // MANIPULATE THE PIXEL (convert to grayscale using luminosity formula)
     Uint8 gray = (Uint8)(0.299 * r + 0.587 * g + 0.114 * b);
     r = gray;
     g = gray;
     b = gray;
 
-    // WRITE THE NEW PIXEL back to the surface
     pixels[i] = setRGBA(r, g, b, a);
-
   }
 
   SDL_UnlockSurface(surface);
@@ -393,9 +286,8 @@ int handle_grayscale(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-
-int handle_restart(Image* image, int argc, char* argv[]){
-
+/* Restart the image to its original form */
+int sclimage_restart(Image* image, int argc, char* argv[]){
 
   Uint32* pixels_edited = (Uint32*)image->surface->pixels;
   Uint32* pixels_original = (Uint32*)image->original->pixels;
@@ -405,13 +297,19 @@ int handle_restart(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-int handle_quantization(Image* image, int argc, char* argv[]){
+/* Quantizes the image to have only n tones, where n is the first and only argument of the function */
+int sclimage_quantization(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
 
+  if(argc <= 1){
+    printf("This function takes one argument: the shades to quantizate.\n");
+    return -1;
+  }
+
   if(!is_grayscale(image)){
     printf("Quantization only works for images in grayscale (at the moment). The image will be converted to grayscale before contining.\n");
-    handle_grayscale(image, 0, NULL);
+    sclimage_grayscale(image, 0, NULL);
   }
 
 
@@ -425,8 +323,10 @@ int handle_quantization(Image* image, int argc, char* argv[]){
   int image_shades = 0;
   int histogram[GRAYSCALE_RANGE] = {0};
 
+  SDL_LockSurface(surface);
+
   for (int i = 0; i < pixel_count; ++i) {
-    // GET THE PIXEL and its individual color components
+
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
     getRBGA(pixel, &r, &g, &b, &a);
@@ -435,16 +335,14 @@ int handle_quantization(Image* image, int argc, char* argv[]){
     if(r < tmin) tmin = r;
 
     if(histogram[r] == 0){
-      image_shades++;
+      image_shades++; // Get the true amount of shades of the image
     }
-    histogram[r]++;
+    histogram[r]++; // Calculate the histogram
   }
 
-  if(shades >= image_shades){
+  if(shades >= image_shades){ // If the image has less shades then the function argument, exits
     return 0;
   }
-
-  SDL_LockSurface(surface);
 
   float bin_size = (float) (tmax - tmin + 1)/shades;
 
@@ -452,15 +350,13 @@ int handle_quantization(Image* image, int argc, char* argv[]){
   int new_shades = 0;
 
   for (int i = 0; i < pixel_count; i++) {
-    // GET THE PIXEL and its individual color components
+
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
     getRBGA(pixel, &r, &g, &b, &a);
 
-    // MANIPULATE THE PIXEL (convert to grayscale using luminosity
-    /* printf("%d and %f, r/binsize = %f, (r-mi)/binsize = %f\n, ", r, bin_size, r/bin_size, (r-tmin)/bin_size); */
     int f = (int)floor((float)(r-tmin)/bin_size);
-    Uint16 new_shade = tmin + (Uint16) f * bin_size + bin_size/2;
+    Uint16 new_shade = tmin + (Uint16) f * bin_size + bin_size/2; // Calculates the new shade for the pixel
 
     r = (Uint8)new_shade;
     g = (Uint8)new_shade;
@@ -471,7 +367,6 @@ int handle_quantization(Image* image, int argc, char* argv[]){
       new_shades++;
     }
     new_histogram[new_shade]++;
-
   }
 
   if(new_shades != shades){
@@ -483,7 +378,7 @@ int handle_quantization(Image* image, int argc, char* argv[]){
 }
 
 
-int handle_load(Image* image, int argc, char* argv[]){
+int sclimage_load(Image* image, int argc, char* argv[]){
 
   if(argc < 2){
     printf("Error: image path missing.\n");
@@ -513,31 +408,30 @@ int handle_load(Image* image, int argc, char* argv[]){
   image->surface = SDL_ConvertSurfaceFormat(original_surface, SDL_PIXELFORMAT_RGBA32, 0);
   image->original = SDL_ConvertSurfaceFormat(original_surface, SDL_PIXELFORMAT_RGBA32, 0);
 
-  SDL_FreeSurface(original_surface); // Free the original surface
+  SDL_FreeSurface(original_surface); // Free the surface used to load
   if (!(image->surface)) {
     fprintf(stderr, "Error: problem when converting surface (%s)\n", SDL_GetError());
     return -1;
   }
 
   strncpy(image->filename, argv[1], MAX_FILENAME_LEN - 1);
-  image->filename[strlen(image->filename) - 1] = '\0'; // Ensure null-termination
+  image->filename[strlen(image->filename) - 1] = '\0'; // Save the name of the file
 
   return 0;
 }
 
 
-int handle_save(Image* image, int argc, char* argv[]){
+int sclimage_save(Image* image, int argc, char* argv[]){
 
   char name[MAX_FILENAME_LEN] = "";
   int quality = 100;
 
-  if(argc > 1){
+  if(argc > 1){ // If a argument is passed, use the argument as filepath to save
     strcpy(name, argv[1]);
-  } else {
+  } else { // Else, replace the image on the original filepath
     strcpy(name, image->filename);
   }
 
-  // Free previous surface
   if(image->surface == NULL){
     printf("Error: tried to save null image, try loading an image first.\n");
     return 0;
@@ -554,8 +448,7 @@ int handle_save(Image* image, int argc, char* argv[]){
 }
 
 
-
-int handle_show(Image* image, int argc, char* argv[]){
+int sclimage_show(Image* image, int argc, char* argv[]){
 
   SDL_Surface* original = NULL;
   SDL_Surface* surface = NULL;
@@ -574,8 +467,8 @@ int handle_show(Image* image, int argc, char* argv[]){
 
 
   SDL_Window* window = SDL_CreateWindow("Original and Edited View", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-			    surface->w + original->w, max(surface->h, original->h),
-			    SDL_WINDOW_SHOWN);
+					surface->w + original->w, max(surface->h, original->h),
+					SDL_WINDOW_SHOWN);
 
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
   SDL_Rect original_dest_rect;
@@ -624,7 +517,8 @@ int handle_show(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-int handle_exit(Image* image, int argc, char* argv[]){
+
+int sclimage_exit(Image* image, int argc, char* argv[]){
     IMG_Quit();
     SDL_Quit();
     exit(0);
