@@ -6,6 +6,7 @@ int sclimage_help(Image* image, int argc, char* argv[]);
 int sclimage_vflip(Image* image, int argc, char* argv[]);
 int sclimage_hflip(Image* image, int argc, char* argv[]);
 int sclimage_show(Image* image, int argc, char* argv[]);
+int sclimage_hide(Image* image, int argc, char* argv[]);
 int sclimage_load(Image* image, int argc, char* argv[]);
 int sclimage_save(Image* image, int argc, char* argv[]);
 int sclimage_grayscale(Image* image, int argc, char* argv[]);
@@ -14,6 +15,17 @@ int sclimage_restart(Image* image, int argc, char* argv[]);
 int sclimage_quantization(Image* image, int argc, char* argv[]);
 int sclimage_exit(Image* image, int argc, char* argv[]);
 
+
+typedef struct {
+    pthread_t thread_id;
+    int is_running;
+    int should_quit;
+    int has_changed; // Flag to signal a redraw is needed
+    Image* image;
+    pthread_mutex_t mutex; // For safe data access between threads
+} ViewerState;
+
+ViewerState g_viewer = {0}; // Initialize our global viewer state
 
 // --- The struct that pairs a command name with a function pointer ---
 typedef struct command {
@@ -32,6 +44,8 @@ Command command_table[] = {
   {"restart", sclimage_restart},
   {"quantization", sclimage_quantization},
   {"show", sclimage_show},
+  {"view", sclimage_show},
+  {"hide", sclimage_hide},
   {"hflip", sclimage_hflip},
   {"vflip", sclimage_vflip},
   {"quit", sclimage_exit},
@@ -161,6 +175,7 @@ int main(int argc, char** argv) {
     // Freeing the image used and exiting the IMG enviroment
     SDL_FreeSurface(image.surface);
     SDL_FreeSurface(image.original);
+    sclimage_hide(NULL, 0, NULL);
     IMG_Quit();
 
     return 0;
@@ -171,6 +186,9 @@ int sclimage_help(Image* img, int argc, char* argv[]) {
     printf("Available commands:\n"
            "  load <filepath>          - Loads an image from a path.\n"
 	   "  open <filepath>          - Same as load.\n"
+	   "  show                     - Show the original image and the edition side by side.\n"
+	   "  view                     - Same as show.\n"
+	   "  hide                     - Close the showed image.\n"
            "  grayscale                - Applies the grayscale filter to image.\n"
 	   "  quantization <shades>    - Quantizes the image to only use <shades> shades.\n"
 	   "  negative                 - Applies the negative filter to the image.\n"
@@ -198,9 +216,14 @@ int sclimage_hflip(Image* image, int argc, char* argv[]){
 
   for (int i = 0; i < surface->h; i++){
     for(int j = 0; j < ppl/2; j++){
+      pthread_mutex_lock(&g_viewer.mutex);
+
       temp = pixels[i*ppl + j];
       pixels[i*ppl + j] = pixels[i*ppl + ppl - j - 1];
       pixels[i*ppl + ppl - j - 1] = temp;
+
+      g_viewer.has_changed = 1;
+      pthread_mutex_unlock(&g_viewer.mutex);
     }
   }
 
@@ -221,9 +244,14 @@ int sclimage_vflip(Image* image, int argc, char* argv[]){
   int ppl = surface->w;
 
   for (int i = 0; i < (surface->h)/2; i++) {
+    pthread_mutex_lock(&g_viewer.mutex);
+
     memcpy(hold_buffer, pixels + i*ppl, sizeof(Uint32)*ppl);
     memcpy(pixels + i*ppl, pixels + ppl*(surface->h - 1) - i*ppl, sizeof(Uint32)*ppl);
     memcpy(pixels + ppl*(surface->h - 1) - i*ppl, hold_buffer, sizeof(Uint32)*ppl);
+
+    g_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_viewer.mutex);
   }
 
   SDL_UnlockSurface(surface);
@@ -241,6 +269,7 @@ int sclimage_negative(Image* image, int argc, char* argv[]){
   int pixel_count = surface->w * surface->h;
 
   for (int i = 0; i < pixel_count; i++) {
+    pthread_mutex_lock(&g_viewer.mutex);
 
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
@@ -251,6 +280,9 @@ int sclimage_negative(Image* image, int argc, char* argv[]){
     b = 255 - b;
 
     pixels[i] = setRGBA(r, g, b, a);
+
+    g_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_viewer.mutex);
   }
 
   SDL_UnlockSurface(surface);
@@ -267,6 +299,7 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
   int pixel_count = surface->w * surface->h;
 
   for (int i = 0; i < pixel_count; i++) {
+    pthread_mutex_lock(&g_viewer.mutex);
 
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
@@ -279,6 +312,9 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
     b = gray;
 
     pixels[i] = setRGBA(r, g, b, a);
+
+    g_viewer.has_changed = 1; // 3. Set the dirty flag
+    pthread_mutex_unlock(&g_viewer.mutex); // 4. Unlock
   }
 
   SDL_UnlockSurface(surface);
@@ -289,10 +325,15 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
 /* Restart the image to its original form */
 int sclimage_restart(Image* image, int argc, char* argv[]){
 
+  pthread_mutex_lock(&g_viewer.mutex); // 1. Lock
+
   Uint32* pixels_edited = (Uint32*)image->surface->pixels;
   Uint32* pixels_original = (Uint32*)image->original->pixels;
   int pixel_count = image->surface->w * image->surface->h;
   memcpy(pixels_edited, pixels_original, sizeof(Uint32)*pixel_count);
+
+  g_viewer.has_changed = 1; // 3. Set the dirty flag
+  pthread_mutex_unlock(&g_viewer.mutex); // 4. Unlock
 
   return 0;
 }
@@ -349,7 +390,9 @@ int sclimage_quantization(Image* image, int argc, char* argv[]){
   int new_histogram[GRAYSCALE_RANGE*2] = {0};
   int new_shades = 0;
 
+
   for (int i = 0; i < pixel_count; i++) {
+    pthread_mutex_lock(&g_viewer.mutex); // 1. Lock
 
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
@@ -363,16 +406,21 @@ int sclimage_quantization(Image* image, int argc, char* argv[]){
     b = (Uint8)new_shade;
 
     pixels[i] = setRGBA(r, g, b, a);
+
+    g_viewer.has_changed = 1; // 3. Set the dirty flag
+    pthread_mutex_unlock(&g_viewer.mutex); // 4. Unlock
+
     if(new_histogram[new_shade] == 0){
       new_shades++;
     }
     new_histogram[new_shade]++;
   }
 
-  if(new_shades != shades){
-    printf("Error: an error occurred while quantizating the image\n");
-    return -1;
-  }
+  /* if(new_shades != shades){ */
+  /*   printf("%d -> %d -> %d", image_shades, shades, new_shades); */
+  /*   printf("Error: an error occurred while quantizating the image\n"); */
+  /*   return -1; */
+  /* } */
 
   return 0;
 }
@@ -403,7 +451,7 @@ int sclimage_load(Image* image, int argc, char* argv[]){
     return -1;
   }
 
-  fflush(stdout);
+  pthread_mutex_lock(&g_viewer.mutex); // Lock before touching shared data
 
   image->surface = SDL_ConvertSurfaceFormat(original_surface, SDL_PIXELFORMAT_RGBA32, 0);
   image->original = SDL_ConvertSurfaceFormat(original_surface, SDL_PIXELFORMAT_RGBA32, 0);
@@ -414,8 +462,15 @@ int sclimage_load(Image* image, int argc, char* argv[]){
     return -1;
   }
 
+  if (g_viewer.is_running) {
+    g_viewer.has_changed = 1;
+  }
+
+  pthread_mutex_unlock(&g_viewer.mutex); // Unlock after updating
+
   strncpy(image->filename, argv[1], MAX_FILENAME_LEN - 1);
   image->filename[strlen(image->filename) - 1] = '\0'; // Save the name of the file
+
 
   return 0;
 }
@@ -447,81 +502,151 @@ int sclimage_save(Image* image, int argc, char* argv[]){
   return 0;
 }
 
+int sclimage_exit(Image* image, int argc, char* argv[]){
 
-int sclimage_show(Image* image, int argc, char* argv[]){
+  sclimage_hide(image, argc, argv);
 
-  SDL_Surface* original = NULL;
-  SDL_Surface* surface = NULL;
+  SDL_FreeSurface(image->surface);
+  SDL_FreeSurface(image->original);
 
-  original = image->original;
-  if(original == NULL){
-    printf("Error: showing null image, try loading an image first.\n");
-    return 0;
-  }
+  IMG_Quit();
+  SDL_Quit();
+  exit(0);
 
-  surface = image->surface;
-  if(surface == NULL){
-    printf("Error: showing null image, try loading an image first.\n");
-    return 0;
-  }
+  return 0;
+}
 
+void* viewer_thread_func(void* arg) {
 
   SDL_Window* window = SDL_CreateWindow("Original and Edited View", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-					surface->w + original->w, max(surface->h, original->h),
+					g_viewer.image->surface->w + g_viewer.image->original->w,
+					max(g_viewer.image->surface->h, g_viewer.image->original->h),
 					SDL_WINDOW_SHOWN);
 
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
-  SDL_Rect original_dest_rect;
-  SDL_Rect edited_dest_rect;
 
-  SDL_Texture* texture_original = NULL;
-  SDL_Texture* texture_edited = NULL;
+  // Using streaming textures to update frequently
+  SDL_Texture* texture_original = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+						    g_viewer.image->original->w, g_viewer.image->original->h);
+  SDL_Texture* texture_edited = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+						  g_viewer.image->surface->w, g_viewer.image->surface->h);
 
-  texture_original = SDL_CreateTextureFromSurface(renderer, original);
-  // Rectangle for the original image (left side)
-  original_dest_rect.x = 0;
-  original_dest_rect.y = 0;
-  original_dest_rect.w = original->w; // Use edited_surface w/h for consistency
-  original_dest_rect.h = original->h;
+  int current_w = g_viewer.image->surface->w + g_viewer.image->original->w;
+  int current_h = max(g_viewer.image->surface->h, g_viewer.image->original->h);
 
-  texture_edited = SDL_CreateTextureFromSurface(renderer, surface);
-  // Rectangle for the edited image (right side)
-  edited_dest_rect.x = original_dest_rect.w; // Position it right next to the original
-  edited_dest_rect.y = 0;
-  edited_dest_rect.w = surface->w;
-  edited_dest_rect.h = surface->h;
+  SDL_UpdateTexture(texture_original, NULL, g_viewer.image->original->pixels, g_viewer.image->original->pitch);
+  SDL_UpdateTexture(texture_edited, NULL, g_viewer.image->surface->pixels, g_viewer.image->surface->pitch);
 
-  int quit = 0;
+  SDL_Rect original_dest_rect = {0, 0, g_viewer.image->original->w, g_viewer.image->original->h};
+
+  SDL_Rect edited_dest_rect = {g_viewer.image->original->w, 0, g_viewer.image->surface->w, g_viewer.image->surface->h};
+
   SDL_Event event;
-  while (!quit) {
+  while (!g_viewer.should_quit) {
     while (SDL_PollEvent(&event)) {
-      if (event.type == SDL_QUIT) quit = 1;
+      if (event.type == SDL_QUIT) {
+	g_viewer.should_quit = 1;
+      }
     }
+
+    pthread_mutex_lock(&g_viewer.mutex);
+    if (g_viewer.has_changed) { // Checking updates for the functions
+      Image* current_image = g_viewer.image;
+
+      // Check if the image dimensions have changed
+      if ((current_image->surface->w + current_image->original->w) != current_w ||
+	  max(current_image->surface->h, current_image->original->h) != current_h) {
+
+
+	current_w = current_image->surface->w + current_image->original->w;
+	current_h = max(current_image->original->h, current_image->surface->h);
+
+	//	printf("Image dimensions changed. Resizing window and textures...\n");
+
+	SDL_SetWindowSize(window, current_w, current_h);
+
+	SDL_DestroyTexture(texture_original);
+	SDL_DestroyTexture(texture_edited);
+
+	// Create new textures
+	texture_original = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+					     current_image->original->w,
+					     current_image->original->h);
+	texture_edited = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
+					   current_image->surface->w,
+					   current_image->surface->h);
+
+	// Update squares
+	original_dest_rect = (SDL_Rect){0, 0, g_viewer.image->original->w, g_viewer.image->original->h};
+	edited_dest_rect = (SDL_Rect){g_viewer.image->original->w, 0, g_viewer.image->surface->w, g_viewer.image->surface->h};
+      }
+
+
+      SDL_UpdateTexture(texture_original, NULL, current_image->original->pixels, current_image->original->pitch);
+      SDL_UpdateTexture(texture_edited, NULL, current_image->surface->pixels, g_viewer.image->surface->pitch);
+      g_viewer.has_changed = 0; // Reset the flag
+    }
+    pthread_mutex_unlock(&g_viewer.mutex);
+
     SDL_RenderClear(renderer);
-
-    /* SDL_RenderCopy(renderer, texture_edited, NULL, NULL); */
-
     SDL_RenderCopy(renderer, texture_original, NULL, &original_dest_rect);
     SDL_RenderCopy(renderer, texture_edited, NULL, &edited_dest_rect);
     SDL_RenderPresent(renderer);
   }
 
-
   SDL_DestroyTexture(texture_original);
   SDL_DestroyTexture(texture_edited);
-
-
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
+  g_viewer.should_quit = 1;
+  pthread_join(g_viewer.thread_id, NULL);
 
-  return 0;
+  pthread_mutex_destroy(&g_viewer.mutex);
+  g_viewer.is_running = 0;
+  /* printf("Viewer thread finished.\n"); */
+  return NULL;
 }
 
 
-int sclimage_exit(Image* image, int argc, char* argv[]){
-    IMG_Quit();
-    SDL_Quit();
-    exit(0);
+int sclimage_show(Image* image, int argc, char* argv[]) {
 
+  if (g_viewer.is_running) {
+    printf("Already showing.\n");
     return 0;
+  }
+
+  if (image == NULL || image->surface == NULL) {
+    printf("Error: No image loaded to show.\n");
+    return 0;
+  }
+
+  g_viewer.image = image;
+  g_viewer.should_quit = 0;
+  g_viewer.has_changed = 1;
+  pthread_mutex_init(&g_viewer.mutex, NULL);
+
+  if (pthread_create(&g_viewer.thread_id, NULL, viewer_thread_func, NULL) != 0) {
+    printf("Error creating the thread to show.\n");
+    return -1;
+  }
+
+  g_viewer.is_running = 1;
+  /* printf("Viewer launched in the background.\n"); */
+  return 0;
+}
+
+// A new "hide" command to gracefully shut down the viewer
+int sclimage_hide(Image* image, int argc, char* argv[]) {
+  if (!g_viewer.is_running) {
+    /* printf("Viewer is not running.\n"); */
+    return 0;
+  }
+
+  g_viewer.should_quit = 1;
+  pthread_join(g_viewer.thread_id, NULL);
+
+  pthread_mutex_destroy(&g_viewer.mutex);
+  g_viewer.is_running = 0;
+  /* printf("Viewer has been closed.\n"); */
+  return 0;
 }
