@@ -104,6 +104,8 @@ int main(int argc, char** argv) {
     char* line;
     char* argv_int[MAX_ARGS];
     int argc_int = 0;
+    int status = 0;
+    int stop = 0;
 
     IMG_Init(IMG_INIT_JPG); // Set up image JPG loading
 
@@ -113,7 +115,12 @@ int main(int argc, char** argv) {
     Image image = {NULL, NULL, ""}; // This instance of Image represents the current image
 
     // Read loop for command line interface
-    while(1){
+    while(!stop){
+
+      if(status != 0){
+	break;
+      }
+
       line = readline("(sclimage) > ");
 
       if (!line) { // this handles the EOF (Ctrl+D) signal and exits the program
@@ -153,11 +160,14 @@ int main(int argc, char** argv) {
 	if (strcmp(argv_int[0], command_table[i].name) == 0) {
 
 	  // If find, call the function
-	  int status = command_table[i].handler(&image, argc_int, argv_int);
+	  status = command_table[i].handler(&image, argc_int, argv_int);
 
 	  // Verify if an error happened when handling the command
-	  if(status != 0){
-	    exit(status);
+	  /* if(status != 0){ */
+	  // Handle status
+	  /* } */
+	  if(status == 1){
+	    stop = 1;
 	  }
 
 	  found_command = 1;
@@ -172,11 +182,15 @@ int main(int argc, char** argv) {
       free(line);
     }
 
+    if (g_viewer.is_running) {
+      printf("Viewer is still running. Shutting it down automatically...\n");
+      sclimage_hide(NULL, 0, NULL);
+    }
     // Freeing the image used and exiting the IMG enviroment
     SDL_FreeSurface(image.surface);
     SDL_FreeSurface(image.original);
-    sclimage_hide(NULL, 0, NULL);
     IMG_Quit();
+    SDL_Quit();
 
     return 0;
 }
@@ -313,8 +327,8 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
 
     pixels[i] = setRGBA(r, g, b, a);
 
-    g_viewer.has_changed = 1; // 3. Set the dirty flag
-    pthread_mutex_unlock(&g_viewer.mutex); // 4. Unlock
+    g_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_viewer.mutex);
   }
 
   SDL_UnlockSurface(surface);
@@ -325,15 +339,15 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
 /* Restart the image to its original form */
 int sclimage_restart(Image* image, int argc, char* argv[]){
 
-  pthread_mutex_lock(&g_viewer.mutex); // 1. Lock
+  pthread_mutex_lock(&g_viewer.mutex);
 
   Uint32* pixels_edited = (Uint32*)image->surface->pixels;
   Uint32* pixels_original = (Uint32*)image->original->pixels;
   int pixel_count = image->surface->w * image->surface->h;
   memcpy(pixels_edited, pixels_original, sizeof(Uint32)*pixel_count);
 
-  g_viewer.has_changed = 1; // 3. Set the dirty flag
-  pthread_mutex_unlock(&g_viewer.mutex); // 4. Unlock
+  g_viewer.has_changed = 1;
+  pthread_mutex_unlock(&g_viewer.mutex);
 
   return 0;
 }
@@ -504,24 +518,17 @@ int sclimage_save(Image* image, int argc, char* argv[]){
 
 int sclimage_exit(Image* image, int argc, char* argv[]){
 
-  sclimage_hide(image, argc, argv);
-
-  SDL_FreeSurface(image->surface);
-  SDL_FreeSurface(image->original);
-
-  IMG_Quit();
-  SDL_Quit();
-  exit(0);
-
-  return 0;
+  return 1;
 }
 
 void* viewer_thread_func(void* arg) {
 
+  SDL_Init(SDL_INIT_VIDEO);
+
   SDL_Window* window = SDL_CreateWindow("Original and Edited View", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 					g_viewer.image->surface->w + g_viewer.image->original->w,
 					max(g_viewer.image->surface->h, g_viewer.image->original->h),
-					SDL_WINDOW_SHOWN);
+					SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
@@ -538,7 +545,6 @@ void* viewer_thread_func(void* arg) {
   SDL_UpdateTexture(texture_edited, NULL, g_viewer.image->surface->pixels, g_viewer.image->surface->pitch);
 
   SDL_Rect original_dest_rect = {0, 0, g_viewer.image->original->w, g_viewer.image->original->h};
-
   SDL_Rect edited_dest_rect = {g_viewer.image->original->w, 0, g_viewer.image->surface->w, g_viewer.image->surface->h};
 
   SDL_Event event;
@@ -576,6 +582,8 @@ void* viewer_thread_func(void* arg) {
 					   current_image->surface->w,
 					   current_image->surface->h);
 
+
+
 	// Update squares
 	original_dest_rect = (SDL_Rect){0, 0, g_viewer.image->original->w, g_viewer.image->original->h};
 	edited_dest_rect = (SDL_Rect){g_viewer.image->original->w, 0, g_viewer.image->surface->w, g_viewer.image->surface->h};
@@ -594,16 +602,14 @@ void* viewer_thread_func(void* arg) {
     SDL_RenderPresent(renderer);
   }
 
+
   SDL_DestroyTexture(texture_original);
   SDL_DestroyTexture(texture_edited);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
-  g_viewer.should_quit = 1;
-  pthread_join(g_viewer.thread_id, NULL);
-
-  pthread_mutex_destroy(&g_viewer.mutex);
-  g_viewer.is_running = 0;
+  SDL_Quit();
   /* printf("Viewer thread finished.\n"); */
+
   return NULL;
 }
 
