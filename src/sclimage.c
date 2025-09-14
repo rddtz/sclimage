@@ -184,6 +184,7 @@ int sclimage_help(Image* img, int argc, char* argv[]) {
   printf("Available commands:\n"
 	 "  load <filepath>          - Loads an image from a path.\n"
 	 "  open <filepath>          - Same as load.\n"
+	 "  save <name>              - Save as <name>. If <name> argument not informed, replace original image.\n"
 	 "  show                     - Show the original image and the edition side by side.\n"
 	 "  view                     - Same as show.\n"
 	 "  close                    - Close the image viewer.\n"
@@ -477,6 +478,9 @@ int sclimage_save(Image* image, int argc, char* argv[]){
 
   if(argc > 1){ // If a argument is passed, use the argument as filepath to save
     strcpy(name, argv[1]);
+    if(argc > 2){
+      quality = atoi(argv[2]);
+    }
   } else { // Else, replace the image on the original filepath
     strcpy(name, image->filename);
   }
