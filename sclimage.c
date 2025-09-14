@@ -1,5 +1,4 @@
 #include "sclimage.h"
-#include <pthread.h> // Include the threads library
 
 // Signatures for the functions of the application
 int sclimage_help(Image* image, int argc, char* argv[]);
@@ -15,25 +14,15 @@ int sclimage_restart(Image* image, int argc, char* argv[]);
 int sclimage_quantization(Image* image, int argc, char* argv[]);
 int sclimage_exit(Image* image, int argc, char* argv[]);
 
+ViewerState g_viewer = {0}; // Global viewer state
 
-typedef struct {
-    pthread_t thread_id;
-    int is_running;
-    int should_quit;
-    int has_changed; // Flag to signal a redraw is needed
-    Image* image;
-    pthread_mutex_t mutex; // For safe data access between threads
-} ViewerState;
-
-ViewerState g_viewer = {0}; // Initialize our global viewer state
-
-// --- The struct that pairs a command name with a function pointer ---
+// Command structe with the name and function pointer
 typedef struct command {
     const char* name;
-    // Pointer to a function that takes Image state and arguments, and returns and int
     int (*handler)(Image* image, int argc, char* argv[]);
 } Command;
 
+// All available commands
 Command command_table[] = {
   {"help", sclimage_help},
   {"load", sclimage_load},
@@ -46,176 +35,173 @@ Command command_table[] = {
   {"show", sclimage_show},
   {"view", sclimage_show},
   {"hide", sclimage_hide},
+  {"close", sclimage_hide},
   {"hflip", sclimage_hflip},
   {"vflip", sclimage_vflip},
   {"quit", sclimage_exit},
   {"exit", sclimage_exit}
 };
 
-const int num_commands = sizeof(command_table) / sizeof(Command);
+// Total commands amount
+int num_commands = sizeof(command_table) / sizeof(Command);
 
+// This is a auto-complete function for the readline library that complete with sclimage commands.
 char* command_generator(const char* text, int state) {
-    static int list_index, len;
-    const char* name;
-    if (!state) {
-        list_index = 0;
-        len = strlen(text);
+
+  static int list_index, len;
+  const char* name;
+  if (!state) {
+    list_index = 0;
+    len = strlen(text);
+  }
+
+  while (list_index < num_commands) {
+    name = command_table[list_index].name;
+    list_index++;
+    if (strncmp(name, text, len) == 0) {
+      return strdup(name);
     }
-    while (list_index < num_commands) {
-        name = command_table[list_index].name;
-        list_index++;
-        if (strncmp(name, text, len) == 0) {
-            return strdup(name);
-        }
-    }
-    return NULL;
+  }
+  return NULL;
 }
 
+// This calls the autocomplete depending on the CLI state
 char** smart_completer(const char* text, int start, int end) {
-    // This prevents readline from trying to complete from a static list by default.
-    rl_attempted_completion_over = 1;
+  // This prevents readline from trying to complete from a static list by default.
+  rl_attempted_completion_over = 1;
 
-    // If 'start' is 0, we are at the beginning of the line, completing the command.
-    if (start == 0) {
-        return rl_completion_matches(text, command_generator);
-    }
+  // If start is 0 we are at the beginning of the line so we complete with the command list.
+  if (start == 0) {
+    return rl_completion_matches(text, command_generator);
+  }
 
-    // If we are not at the start, we are completing an argument.
-    // We need to check what the command (the first word) is.
-    // Make a copy of the line buffer because strtok is destructive.
-    char* line_copy = strdup(rl_line_buffer);
-    char* command = strtok(line_copy, " ");
+  // If we are not at the start, we are completing an argument.
+  char* line_copy = strdup(rl_line_buffer);
+  char* command = strtok(line_copy, " ");
 
-    // Check if the command is one that takes a filename.
-    if (command && (strcmp(command, "load") == 0 || strcmp(command, "open") == 0)) {
-        free(line_copy);
-        // Use readline's built-in filename completer.
-        return rl_completion_matches(text, rl_filename_completion_function);
-    }
-
-    // If the command is something else (like 'blur'), do nothing.
+  // Check if the command is one that takes a filename as a argument.
+  if (command && (strcmp(command, "load") == 0 || strcmp(command, "open") == 0)) {
     free(line_copy);
-    return NULL;
+    // Use readline built-in filename completer.
+    return rl_completion_matches(text, rl_filename_completion_function);
+  }
+
+  // If the command is something else, return.
+  free(line_copy);
+  return NULL;
 }
 
 
 int main(int argc, char** argv) {
 
-    char* line;
-    char* argv_int[MAX_ARGS];
-    int argc_int = 0;
-    int status = 0;
-    int stop = 0;
+  char* line;
+  char* argv_int[SCLIMAGE_MAX_ARGS];
+  int argc_int = 0;
+  int status = 0;
+  int stop = 0;
 
-    IMG_Init(IMG_INIT_JPG); // Set up image JPG loading
+  IMG_Init(IMG_INIT_JPG); // Set up image JPG loading
 
-    printf("Welcome to the Simple Command Line Interface for Image Processing (SCLIMAGE)!\nType 'help' for commands.\n");
+  printf("Welcome to the Simple Command Line Interface for Image Processing (SCLIMAGE)!\nType 'help' for commands.\n");
 
-    rl_attempted_completion_function = smart_completer;
-    Image image = {NULL, NULL, ""}; // This instance of Image represents the current image
+  rl_attempted_completion_function = smart_completer;
+  Image image = {NULL, NULL, ""}; // This instance of Image represents the current image
 
-    // Read loop for command line interface
-    while(!stop){
+  // Read loop for command line interface
+  while(!stop){
 
-      if(status != 0){
-	break;
-      }
+    line = readline("(sclimage) > ");
 
-      line = readline("(sclimage) > ");
+    if (!line) { // this handles the EOF (Ctrl+D) signal and exits the program
+      printf("exit\n");
+      break;
+    }
 
-      if (!line) { // this handles the EOF (Ctrl+D) signal and exits the program
-	printf("exit\n");
-	break;
-      }
+    if (strlen(line) > 0) { // If the line isn't empty, add to history of commands
+      add_history(line);
+    }
 
-      if (strlen(line) > 0) { // If the line isn't empty, add to history of commands
-	add_history(line);
-      }
+    // Remove the \n from the input
+    line[strcspn(line, "\n")] = 0;
 
-      // Remove the \n from the input
-      line[strcspn(line, "\n")] = 0;
+    // Copying the line to a new array that can be used to tokenize the arguments
+    char line_copy[SCLIMAGE_MAX_LINE_LEN];
+    strncpy(line_copy, line, SCLIMAGE_MAX_LINE_LEN - 1);
+    line_copy[SCLIMAGE_MAX_LINE_LEN - 1] = '\0';
 
-      // Copying the line to a new array that can be used to tokenize the arguments
-      char line_copy[MAX_LINE_LEN];
-      strncpy(line_copy, line, MAX_LINE_LEN - 1);
-      line_copy[MAX_LINE_LEN - 1] = '\0';
+    // Tokenize the input, creating a argc and argv for each command
+    argc_int = 0;
+    char* token = strtok(line_copy, " \t");
+    while (token != NULL && argc_int < SCLIMAGE_MAX_ARGS - 1) {
+      argv_int[argc_int++] = token;
+      token = strtok(NULL, " \t");
+    }
+    argv_int[argc_int] = NULL;
 
-      // Tokenize the input, creating a argc and argv for each command
-      argc_int = 0;
-      char* token = strtok(line_copy, " \t");
-      while (token != NULL && argc_int < MAX_ARGS - 1) {
-	argv_int[argc_int++] = token;
-	token = strtok(NULL, " \t");
-      }
-      argv_int[argc_int] = NULL;
-
-      if (argc_int == 0) { // If the line was empty (after tokenization), free and continue
-	free(line);
-	continue;
-      }
-
-      // Loop to match the input command with the available one
-      int found_command = 0;
-      for (int i = 0; i < num_commands; i++) {
-	if (strcmp(argv_int[0], command_table[i].name) == 0) {
-
-	  // If find, call the function
-	  status = command_table[i].handler(&image, argc_int, argv_int);
-
-	  // Verify if an error happened when handling the command
-	  /* if(status != 0){ */
-	  // Handle status
-	  /* } */
-	  if(status == 1){
-	    stop = 1;
-	  }
-
-	  found_command = 1;
-	  break;
-	}
-      }
-
-      if (!found_command) {
-	printf("Unknown command: '%s'. Type 'help' for a list of commands.\n", argv_int[0]);
-      }
-
+    if (argc_int == 0) { // If the line was empty (after tokenization), free and continue
       free(line);
+      continue;
     }
 
-    if (g_viewer.is_running) {
-      printf("Viewer is still running. Shutting it down automatically...\n");
-      sclimage_hide(NULL, 0, NULL);
-    }
-    // Freeing the image used and exiting the IMG enviroment
-    SDL_FreeSurface(image.surface);
-    SDL_FreeSurface(image.original);
-    IMG_Quit();
-    SDL_Quit();
+    // Loop to match the input command with the available one
+    int found_command = 0;
+    for (int i = 0; i < num_commands; i++) {
+      if (strcmp(argv_int[0], command_table[i].name) == 0) {
 
-    return 0;
+	// If find, call the function
+	status = command_table[i].handler(&image, argc_int, argv_int);
+
+	stop = sclimage_error(status);
+
+	found_command = 1;
+	break;
+      }
+    }
+
+    if (!found_command) {
+      printf("Unknown command: '%s'. Type 'help' for a list of commands.\n", argv_int[0]);
+    }
+
+    free(line);
+  }
+
+  if (g_viewer.is_running || (!g_viewer.close_correctly)) { // If the viewer is running, close it before exiting to prevent memory leak
+    sclimage_hide(NULL, 0, NULL);
+  }
+
+  // Freeing the image used and exiting the IMG enviroment
+  SDL_FreeSurface(image.surface);
+  SDL_FreeSurface(image.original);
+  IMG_Quit();
+  SDL_Quit();
+
+  return 0;
 }
 
 
+// Show help massage
 int sclimage_help(Image* img, int argc, char* argv[]) {
-    printf("Available commands:\n"
-           "  load <filepath>          - Loads an image from a path.\n"
-	   "  open <filepath>          - Same as load.\n"
-	   "  show                     - Show the original image and the edition side by side.\n"
-	   "  view                     - Same as show.\n"
-	   "  hide                     - Close the showed image.\n"
-           "  grayscale                - Applies the grayscale filter to image.\n"
-	   "  quantization <shades>    - Quantizes the image to only use <shades> shades.\n"
-	   "  negative                 - Applies the negative filter to the image.\n"
-	   "  hflip                    - Flips the image horizontally.\n"
-	   "  vflip                    - Flips the image vertically.\n"
-           "  exit                     - Exits the shell.\n"
-	   "  quit                     - Same as exit.\n"
-           "  help                     - Shows this help message.\n");
+  printf("Available commands:\n"
+	 "  load <filepath>          - Loads an image from a path.\n"
+	 "  open <filepath>          - Same as load.\n"
+	 "  show                     - Show the original image and the edition side by side.\n"
+	 "  view                     - Same as show.\n"
+	 "  close                    - Close the image viewer.\n"
+	 "  hide                     - Same as close.\n"
+	 "  grayscale                - Applies the grayscale filter to image.\n"
+	 "  quantization <shades>    - Quantizes the image to only use <shades> shades.\n"
+	 "  negative                 - Applies the negative filter to the image.\n"
+	 "  hflip                    - Flips the image horizontally.\n"
+	 "  vflip                    - Flips the image vertically.\n"
+	 "  exit                     - Exits the shell.\n"
+	 "  quit                     - Same as exit.\n"
+	 "  help                     - Shows this help message.\n");
 
-    return 0;
+  return 0;
 }
 
 
+// Flips the image horizontally
 int sclimage_hflip(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
@@ -246,6 +232,7 @@ int sclimage_hflip(Image* image, int argc, char* argv[]){
 }
 
 
+// Flip the image vertically
 int sclimage_vflip(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
@@ -254,7 +241,7 @@ int sclimage_vflip(Image* image, int argc, char* argv[]){
 
   Uint32* pixels = (Uint32*)surface->pixels;
 
-  Uint32 hold_buffer[MAX_IMAGE_WIDTH] = {0};
+  Uint32 hold_buffer[SCLIMAGE_MAX_IMAGE_WIDTH] = {0};
   int ppl = surface->w;
 
   for (int i = 0; i < (surface->h)/2; i++) {
@@ -274,6 +261,7 @@ int sclimage_vflip(Image* image, int argc, char* argv[]){
 }
 
 
+// Apply negative filter to the image
 int sclimage_negative(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
@@ -304,6 +292,8 @@ int sclimage_negative(Image* image, int argc, char* argv[]){
   return 0;
 }
 
+
+// Apply the grayscale filter to the image
 int sclimage_grayscale(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
@@ -336,7 +326,8 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-/* Restart the image to its original form */
+
+// Restart the image to its original form
 int sclimage_restart(Image* image, int argc, char* argv[]){
 
   pthread_mutex_lock(&g_viewer.mutex);
@@ -352,31 +343,29 @@ int sclimage_restart(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-/* Quantizes the image to have only n tones, where n is the first and only argument of the function */
+
+// Quantizes the image to have only n tones, where n is the first and only argument of the function
 int sclimage_quantization(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
 
   if(argc <= 1){
-    printf("This function takes one argument: the shades to quantizate.\n");
-    return -1;
+    return SCLIMAGE_QUANTIZATION_ARGUMENT_MISSING;
   }
 
   if(!is_grayscale(image)){
-    printf("Quantization only works for images in grayscale (at the moment). The image will be converted to grayscale before contining.\n");
+    fprintf(stderr, "Warning: Quantization only works for images in grayscale (at the moment). The image will be converted to grayscale before contining.\n");
     sclimage_grayscale(image, 0, NULL);
   }
 
-
   Uint32* pixels = (Uint32*)surface->pixels;
   int pixel_count = surface->w * surface->h;
-
 
   int shades = atoi(argv[1]); // first and only argument is the new amount of shades of the image
   int tmax = -1;
   int tmin = 256;
   int image_shades = 0;
-  int histogram[GRAYSCALE_RANGE] = {0};
+  int histogram[SCLIMAGE_GRAYSCALE_RANGE] = {0};
 
   SDL_LockSurface(surface);
 
@@ -399,14 +388,13 @@ int sclimage_quantization(Image* image, int argc, char* argv[]){
     return 0;
   }
 
-  float bin_size = (float) (tmax - tmin + 1)/shades;
+  float bin_size = (float) (tmax - tmin + 1)/shades; // Bin interval
 
-  int new_histogram[GRAYSCALE_RANGE*2] = {0};
+  int new_histogram[SCLIMAGE_GRAYSCALE_RANGE*2] = {0};
   int new_shades = 0;
 
-
   for (int i = 0; i < pixel_count; i++) {
-    pthread_mutex_lock(&g_viewer.mutex); // 1. Lock
+    pthread_mutex_lock(&g_viewer.mutex);
 
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
@@ -421,8 +409,8 @@ int sclimage_quantization(Image* image, int argc, char* argv[]){
 
     pixels[i] = setRGBA(r, g, b, a);
 
-    g_viewer.has_changed = 1; // 3. Set the dirty flag
-    pthread_mutex_unlock(&g_viewer.mutex); // 4. Unlock
+    g_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_viewer.mutex);
 
     if(new_histogram[new_shade] == 0){
       new_shades++;
@@ -430,21 +418,15 @@ int sclimage_quantization(Image* image, int argc, char* argv[]){
     new_histogram[new_shade]++;
   }
 
-  /* if(new_shades != shades){ */
-  /*   printf("%d -> %d -> %d", image_shades, shades, new_shades); */
-  /*   printf("Error: an error occurred while quantizating the image\n"); */
-  /*   return -1; */
-  /* } */
-
   return 0;
 }
 
 
+// Load a new image to modify
 int sclimage_load(Image* image, int argc, char* argv[]){
 
   if(argc < 2){
-    printf("Error: image path missing.\n");
-    return 0;
+    return SCLIMAGE_LOAD_MISSING_PATH;
   }
 
   if(argc > 2){
@@ -461,8 +443,7 @@ int sclimage_load(Image* image, int argc, char* argv[]){
 
   SDL_Surface* original_surface = IMG_Load(argv[1]);
   if (!original_surface) {
-    fprintf(stderr, "Error: problem when loading image (%s)\n", IMG_GetError());
-    return -1;
+    return SCLIMAGE_LOAD_ERROR;
   }
 
   pthread_mutex_lock(&g_viewer.mutex); // Lock before touching shared data
@@ -472,8 +453,7 @@ int sclimage_load(Image* image, int argc, char* argv[]){
 
   SDL_FreeSurface(original_surface); // Free the surface used to load
   if (!(image->surface)) {
-    fprintf(stderr, "Error: problem when converting surface (%s)\n", SDL_GetError());
-    return -1;
+    return SCLIMAGE_CONVERT_ERROR;
   }
 
   if (g_viewer.is_running) {
@@ -482,17 +462,17 @@ int sclimage_load(Image* image, int argc, char* argv[]){
 
   pthread_mutex_unlock(&g_viewer.mutex); // Unlock after updating
 
-  strncpy(image->filename, argv[1], MAX_FILENAME_LEN - 1);
+  strncpy(image->filename, argv[1], SCLIMAGE_MAX_FILENAME_LEN - 1);
   image->filename[strlen(image->filename) - 1] = '\0'; // Save the name of the file
-
 
   return 0;
 }
 
 
+// Save the current image
 int sclimage_save(Image* image, int argc, char* argv[]){
 
-  char name[MAX_FILENAME_LEN] = "";
+  char name[SCLIMAGE_MAX_FILENAME_LEN] = "";
   int quality = 100;
 
   if(argc > 1){ // If a argument is passed, use the argument as filepath to save
@@ -502,28 +482,29 @@ int sclimage_save(Image* image, int argc, char* argv[]){
   }
 
   if(image->surface == NULL){
-    printf("Error: tried to save null image, try loading an image first.\n");
-    return 0;
+    return SCLIMAGE_SAVE_NULL;
   }
 
   printf("Saving as %s\n", name);
 
   if( IMG_SaveJPG(image->surface, name, quality) ){
-    fprintf(stderr, "Error: problem when saving image (%s)\n", IMG_GetError());
-    return -1;
+    return SCLIMAGE_SAVE_ERROR;
   }
 
   return 0;
 }
 
-int sclimage_exit(Image* image, int argc, char* argv[]){
 
-  return 1;
+// Return the status to exit the program
+int sclimage_exit(Image* image, int argc, char* argv[]){
+  return SCLIMAGE_EXIT;
 }
 
+
+// This is a thread function to show the image using SDL Library whitout freezing the terminal
 void* viewer_thread_func(void* arg) {
 
-  SDL_Init(SDL_INIT_VIDEO);
+  SDL_Init(SDL_INIT_VIDEO); // Start video to show the image
 
   SDL_Window* window = SDL_CreateWindow("Original and Edited View", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 					g_viewer.image->surface->w + g_viewer.image->original->w,
@@ -538,28 +519,31 @@ void* viewer_thread_func(void* arg) {
   SDL_Texture* texture_edited = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
 						  g_viewer.image->surface->w, g_viewer.image->surface->h);
 
-  int current_w = g_viewer.image->surface->w + g_viewer.image->original->w;
-  int current_h = max(g_viewer.image->surface->h, g_viewer.image->original->h);
-
   SDL_UpdateTexture(texture_original, NULL, g_viewer.image->original->pixels, g_viewer.image->original->pitch);
   SDL_UpdateTexture(texture_edited, NULL, g_viewer.image->surface->pixels, g_viewer.image->surface->pitch);
 
   SDL_Rect original_dest_rect = {0, 0, g_viewer.image->original->w, g_viewer.image->original->h};
   SDL_Rect edited_dest_rect = {g_viewer.image->original->w, 0, g_viewer.image->surface->w, g_viewer.image->surface->h};
 
+
+  int current_w = g_viewer.image->surface->w + g_viewer.image->original->w;
+  int current_h = max(g_viewer.image->surface->h, g_viewer.image->original->h);
+
   SDL_Event event;
   while (!g_viewer.should_quit) {
+
     while (SDL_PollEvent(&event)) {
       if (event.type == SDL_QUIT) {
 	g_viewer.should_quit = 1;
+	g_viewer.close_correctly = 0;
       }
     }
 
     pthread_mutex_lock(&g_viewer.mutex);
-    if (g_viewer.has_changed) { // Checking updates for the functions
+    if (g_viewer.has_changed) { // Checking updates in the image by the functions
       Image* current_image = g_viewer.image;
 
-      // Check if the image dimensions have changed
+      // Check if the image dimensions have changed, if so, resize the window
       if ((current_image->surface->w + current_image->original->w) != current_w ||
 	  max(current_image->surface->h, current_image->original->h) != current_h) {
 
@@ -567,7 +551,6 @@ void* viewer_thread_func(void* arg) {
 	current_w = current_image->surface->w + current_image->original->w;
 	current_h = max(current_image->original->h, current_image->surface->h);
 
-	//	printf("Image dimensions changed. Resizing window and textures...\n");
 
 	SDL_SetWindowSize(window, current_w, current_h);
 
@@ -589,7 +572,6 @@ void* viewer_thread_func(void* arg) {
 	edited_dest_rect = (SDL_Rect){g_viewer.image->original->w, 0, g_viewer.image->surface->w, g_viewer.image->surface->h};
       }
 
-
       SDL_UpdateTexture(texture_original, NULL, current_image->original->pixels, current_image->original->pitch);
       SDL_UpdateTexture(texture_edited, NULL, current_image->surface->pixels, g_viewer.image->surface->pitch);
       g_viewer.has_changed = 0; // Reset the flag
@@ -607,44 +589,41 @@ void* viewer_thread_func(void* arg) {
   SDL_DestroyTexture(texture_edited);
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
-  SDL_Quit();
-  /* printf("Viewer thread finished.\n"); */
+  SDL_Quit(); // Close video
 
   return NULL;
 }
 
 
+// Shows the image by calling a thread to do so, doing this prevents the terminal to freeze
 int sclimage_show(Image* image, int argc, char* argv[]) {
 
   if (g_viewer.is_running) {
-    printf("Already showing.\n");
-    return 0;
+    return SCLIMAGE_ALREADY_SHOWING;
   }
 
   if (image == NULL || image->surface == NULL) {
-    printf("Error: No image loaded to show.\n");
-    return 0;
+    return SCLIMAGE_SHOW_NULL;
   }
 
   g_viewer.image = image;
   g_viewer.should_quit = 0;
   g_viewer.has_changed = 1;
+  g_viewer.close_correctly = 0;
   pthread_mutex_init(&g_viewer.mutex, NULL);
 
   if (pthread_create(&g_viewer.thread_id, NULL, viewer_thread_func, NULL) != 0) {
-    printf("Error creating the thread to show.\n");
-    return -1;
+    return SCLIMAGE_SHOW_THREAD_ERROR;
   }
 
   g_viewer.is_running = 1;
-  /* printf("Viewer launched in the background.\n"); */
   return 0;
 }
 
-// A new "hide" command to gracefully shut down the viewer
+
+// Stop showing the image (ends the showing thread)
 int sclimage_hide(Image* image, int argc, char* argv[]) {
   if (!g_viewer.is_running) {
-    /* printf("Viewer is not running.\n"); */
     return 0;
   }
 
@@ -653,6 +632,6 @@ int sclimage_hide(Image* image, int argc, char* argv[]) {
 
   pthread_mutex_destroy(&g_viewer.mutex);
   g_viewer.is_running = 0;
-  /* printf("Viewer has been closed.\n"); */
+  g_viewer.close_correctly = 1;
   return 0;
 }
