@@ -5,12 +5,12 @@ LIBS= -lreadline -I/usr/include/SDL2 -D_REENTRANT -I/usr/include/libpng16 -I/usr
 
 .PHONY: all clean
 
-all: qr-openmp-empty
+all: sclimage
 
 %.o: %.c
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) -c -o $@ $<
 
-sclimage: sclimage.o sclimage.h
+sclimage: src/sclimage.o src/sclimage.h
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) -o $@ $< $(LIBS)
 
 run:
@@ -18,4 +18,4 @@ run:
 	./sclimage
 
 clean:
-	rm -f *.o sclimage
+	rm -f *.o src/*.o sclimage
