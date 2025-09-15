@@ -1,0 +1,31 @@
+#+STARTUP: content
+#+STARTUP: overview
+#+STARTUP: indent
+#+STARTUP: latexpreview
+#+TITLE: SCLIMAGE
+#+AUTHOR: Rayan Raddatz de Matos
+
+Simple Command Line Interface for Image Processing (SCLIMAGE) is a C
+command-line tool for fast image procesing.
+** Installation from source
+
+*** Requirements
+
+Sclimage requires the SDL2 and SDL2_Image libraries to load and save
+the images. The user can install this libraries in the system with the
+following commands:
+
+#+begin_src
+sudo apt install libsdl2-dev libsdl2-image-dev
+#+end_src
+
+*** Building
+
+After installing the requirements, the user can just build and run the
+package using the =make= command:
+
+#+begin_src
+make sclimage
+#+end_src
+
+The program can then be executed with =./sclimage=.
