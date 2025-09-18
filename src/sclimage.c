@@ -334,16 +334,15 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
 }
 
 // Adjust image brightness of an image
+// Is this right?
 int sclimage_brightness(Image* image, int argc, char* argv[]){
 
-  SDL_Surface* surface = image->surface;
-
-  if(argc <= 1)
+  if(argc <= 1){
     return SCLIMAGE_BRIGHTNESS_ARGUMENT_MISSING;
   }
 
-  int scalar = argv[1];
-
+  int scalar = atoi(argv[1]);
+  SDL_Surface* surface = image->surface;
   SDL_LockSurface(surface);
 
   Uint32* pixels = (Uint32*)surface->pixels;
@@ -357,10 +356,9 @@ int sclimage_brightness(Image* image, int argc, char* argv[]){
 
     getRBGA(pixel, &r, &g, &b, &a);
 
-    Uint8 gray = (Uint8)(0.299 * r + 0.587 * g + 0.114 * b);
-    r = gray;
-    g = gray;
-    b = gray;
+    r = min(255, max(0, r + scalar));
+    g = min(255, max(0, g + scalar));
+    b = min(255, max(0, b + scalar));
 
     pixels[i] = setRGBA(r, g, b, a);
 
