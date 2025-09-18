@@ -426,6 +426,22 @@ int sclimage_quantization(Image* image, int argc, char* argv[]){
 }
 
 
+// Restart the image to its original form
+int sclimage_restart(Image* image, int argc, char* argv[]){
+
+  pthread_mutex_lock(&g_image_viewer.mutex);
+
+  Uint32* pixels_edited = (Uint32*)image->surface->pixels;
+  Uint32* pixels_original = (Uint32*)image->original->pixels;
+  int pixel_count = image->surface->w * image->surface->h;
+  memcpy(pixels_edited, pixels_original, sizeof(Uint32)*pixel_count);
+
+  g_image_viewer.has_changed = 1;
+  pthread_mutex_unlock(&g_image_viewer.mutex);
+
+  return 0;
+}
+
 // Load a new image to modify
 int sclimage_load(Image* image, int argc, char* argv[]){
 
