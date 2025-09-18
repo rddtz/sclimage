@@ -33,6 +33,7 @@
 #define SCLIMAGE_SHOW_NULL -8
 #define SCLIMAGE_SHOW_THREAD_ERROR -9
 #define SCLIMAGE_QUANTIZATION_ARGUMENT_MISSING -10
+#define SCLIMAGE_BRIGHTNESS_ARGUMENT_MISSING -10
 #define SCLIMAGE_OK 0
 
 
@@ -175,7 +176,12 @@ int sclimage_error(int status){
   case SCLIMAGE_QUANTIZATION_ARGUMENT_MISSING:
     snprintf(error_msg, SCLIMAGE_MAX_LINE_LEN, "Error: amount of shades not informed, try again with 'quantization <shades>'.\n");
     break;
+
+  case SCLIMAGE_BRIGHTNESS_ARGUMENT_MISSING:
+    snprintf(error_msg, SCLIMAGE_MAX_LINE_LEN, "Error: brightness scalar not informed, try again with 'brightness <scalar>'.\n");
+    break;
   }
+
 
   fprintf(stderr, error_msg);
   return 0;

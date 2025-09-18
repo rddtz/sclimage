@@ -14,6 +14,8 @@ int sclimage_restart(Image* image, int argc, char* argv[]);
 int sclimage_quantization(Image* image, int argc, char* argv[]);
 int sclimage_histogram(Image* image, int argc, char* argv[]);
 int sclimage_exit(Image* image, int argc, char* argv[]);
+int sclimage_brightness(Image* image, int argc, char* argv[]);
+
 ViewerState g_image_viewer = {0}; // Global viewer state
 ViewerState g_histogram_viewer = {0}; // Global viewer state
 
@@ -35,6 +37,7 @@ Command command_table[] = {
   {"restart", sclimage_restart},
   {"quantization", sclimage_quantization},
   {"histogram", sclimage_histogram},
+  {"brightness", sclimage_brightness},
   {"show", sclimage_show},
   {"view", sclimage_show},
   {"hide", sclimage_hide},
@@ -330,19 +333,42 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
   return 0;
 }
 
+// Adjust image brightness of an image
+int sclimage_brightness(Image* image, int argc, char* argv[]){
 
-// Restart the image to its original form
-int sclimage_restart(Image* image, int argc, char* argv[]){
+  SDL_Surface* surface = image->surface;
 
-  pthread_mutex_lock(&g_viewer.mutex);
+  if(argc <= 1)
+    return SCLIMAGE_BRIGHTNESS_ARGUMENT_MISSING;
+  }
 
-  Uint32* pixels_edited = (Uint32*)image->surface->pixels;
-  Uint32* pixels_original = (Uint32*)image->original->pixels;
-  int pixel_count = image->surface->w * image->surface->h;
-  memcpy(pixels_edited, pixels_original, sizeof(Uint32)*pixel_count);
+  int scalar = argv[1];
 
-  g_viewer.has_changed = 1;
-  pthread_mutex_unlock(&g_viewer.mutex);
+  SDL_LockSurface(surface);
+
+  Uint32* pixels = (Uint32*)surface->pixels;
+  int pixel_count = surface->w * surface->h;
+
+  for (int i = 0; i < pixel_count; i++) {
+    pthread_mutex_lock(&g_image_viewer.mutex);
+
+    Uint32 pixel = pixels[i];
+    Uint8 r, g, b, a;
+
+    getRBGA(pixel, &r, &g, &b, &a);
+
+    Uint8 gray = (Uint8)(0.299 * r + 0.587 * g + 0.114 * b);
+    r = gray;
+    g = gray;
+    b = gray;
+
+    pixels[i] = setRGBA(r, g, b, a);
+
+    g_image_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_image_viewer.mutex);
+  }
+
+  SDL_UnlockSurface(surface);
 
   return 0;
 }
