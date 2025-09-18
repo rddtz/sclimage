@@ -12,9 +12,11 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]);
 int sclimage_negative(Image* image, int argc, char* argv[]);
 int sclimage_restart(Image* image, int argc, char* argv[]);
 int sclimage_quantization(Image* image, int argc, char* argv[]);
+int sclimage_histogram(Image* image, int argc, char* argv[]);
 int sclimage_exit(Image* image, int argc, char* argv[]);
+ViewerState g_image_viewer = {0}; // Global viewer state
+ViewerState g_histogram_viewer = {0}; // Global viewer state
 
-ViewerState g_viewer = {0}; // Global viewer state
 
 // Command structe with the name and function pointer
 typedef struct command {
@@ -32,6 +34,7 @@ Command command_table[] = {
   {"negative", sclimage_negative},
   {"restart", sclimage_restart},
   {"quantization", sclimage_quantization},
+  {"histogram", sclimage_histogram},
   {"show", sclimage_show},
   {"view", sclimage_show},
   {"hide", sclimage_hide},
@@ -165,7 +168,7 @@ int main(int argc, char** argv) {
     free(line);
   }
 
-  if (g_viewer.is_running || (!g_viewer.close_correctly)) { // If the viewer is running, close it before exiting to prevent memory leak
+  if (g_image_viewer.is_running || (!g_image_viewer.close_correctly)) { // If the viewer is running, close it before exiting to prevent memory leak
     sclimage_hide(NULL, 0, NULL);
   }
 
@@ -217,14 +220,14 @@ int sclimage_hflip(Image* image, int argc, char* argv[]){
 
   for (int i = 0; i < surface->h; i++){
     for(int j = 0; j < ppl/2; j++){
-      pthread_mutex_lock(&g_viewer.mutex);
+      pthread_mutex_lock(&g_image_viewer.mutex);
 
       temp = pixels[i*ppl + j];
       pixels[i*ppl + j] = pixels[i*ppl + ppl - j - 1];
       pixels[i*ppl + ppl - j - 1] = temp;
 
-      g_viewer.has_changed = 1;
-      pthread_mutex_unlock(&g_viewer.mutex);
+      g_image_viewer.has_changed = 1;
+      pthread_mutex_unlock(&g_image_viewer.mutex);
     }
   }
 
@@ -246,14 +249,14 @@ int sclimage_vflip(Image* image, int argc, char* argv[]){
   int ppl = surface->w;
 
   for (int i = 0; i < (surface->h)/2; i++) {
-    pthread_mutex_lock(&g_viewer.mutex);
+    pthread_mutex_lock(&g_image_viewer.mutex);
 
     memcpy(hold_buffer, pixels + i*ppl, sizeof(Uint32)*ppl);
     memcpy(pixels + i*ppl, pixels + ppl*(surface->h - 1) - i*ppl, sizeof(Uint32)*ppl);
     memcpy(pixels + ppl*(surface->h - 1) - i*ppl, hold_buffer, sizeof(Uint32)*ppl);
 
-    g_viewer.has_changed = 1;
-    pthread_mutex_unlock(&g_viewer.mutex);
+    g_image_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_image_viewer.mutex);
   }
 
   SDL_UnlockSurface(surface);
@@ -272,7 +275,7 @@ int sclimage_negative(Image* image, int argc, char* argv[]){
   int pixel_count = surface->w * surface->h;
 
   for (int i = 0; i < pixel_count; i++) {
-    pthread_mutex_lock(&g_viewer.mutex);
+    pthread_mutex_lock(&g_image_viewer.mutex);
 
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
@@ -284,8 +287,8 @@ int sclimage_negative(Image* image, int argc, char* argv[]){
 
     pixels[i] = setRGBA(r, g, b, a);
 
-    g_viewer.has_changed = 1;
-    pthread_mutex_unlock(&g_viewer.mutex);
+    g_image_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_image_viewer.mutex);
   }
 
   SDL_UnlockSurface(surface);
@@ -304,7 +307,7 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
   int pixel_count = surface->w * surface->h;
 
   for (int i = 0; i < pixel_count; i++) {
-    pthread_mutex_lock(&g_viewer.mutex);
+    pthread_mutex_lock(&g_image_viewer.mutex);
 
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
@@ -318,8 +321,8 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
 
     pixels[i] = setRGBA(r, g, b, a);
 
-    g_viewer.has_changed = 1;
-    pthread_mutex_unlock(&g_viewer.mutex);
+    g_image_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_image_viewer.mutex);
   }
 
   SDL_UnlockSurface(surface);
@@ -395,7 +398,7 @@ int sclimage_quantization(Image* image, int argc, char* argv[]){
   int new_shades = 0;
 
   for (int i = 0; i < pixel_count; i++) {
-    pthread_mutex_lock(&g_viewer.mutex);
+    pthread_mutex_lock(&g_image_viewer.mutex);
 
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
@@ -410,8 +413,8 @@ int sclimage_quantization(Image* image, int argc, char* argv[]){
 
     pixels[i] = setRGBA(r, g, b, a);
 
-    g_viewer.has_changed = 1;
-    pthread_mutex_unlock(&g_viewer.mutex);
+    g_image_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_image_viewer.mutex);
 
     if(new_histogram[new_shade] == 0){
       new_shades++;
@@ -447,7 +450,7 @@ int sclimage_load(Image* image, int argc, char* argv[]){
     return SCLIMAGE_LOAD_ERROR;
   }
 
-  pthread_mutex_lock(&g_viewer.mutex); // Lock before touching shared data
+  pthread_mutex_lock(&g_image_viewer.mutex); // Lock before touching shared data
 
   image->surface = SDL_ConvertSurfaceFormat(original_surface, SDL_PIXELFORMAT_RGBA32, 0);
   image->original = SDL_ConvertSurfaceFormat(original_surface, SDL_PIXELFORMAT_RGBA32, 0);
@@ -457,18 +460,17 @@ int sclimage_load(Image* image, int argc, char* argv[]){
     return SCLIMAGE_CONVERT_ERROR;
   }
 
-  if (g_viewer.is_running) {
-    g_viewer.has_changed = 1;
+  if (g_image_viewer.is_running) {
+    g_image_viewer.has_changed = 1;
   }
 
-  pthread_mutex_unlock(&g_viewer.mutex); // Unlock after updating
+  pthread_mutex_unlock(&g_image_viewer.mutex); // Unlock after updating
 
   strncpy(image->filename, argv[1], SCLIMAGE_MAX_FILENAME_LEN - 1);
   image->filename[strlen(image->filename) - 1] = '\0'; // Save the name of the file
 
   return 0;
 }
-
 
 // Save the current image
 int sclimage_save(Image* image, int argc, char* argv[]){
@@ -506,46 +508,46 @@ int sclimage_exit(Image* image, int argc, char* argv[]){
 
 
 // This is a thread function to show the image using SDL Library whitout freezing the terminal
-void* viewer_thread_func(void* arg) {
+void* viewer_image_thread_func(void* arg) {
 
   SDL_Init(SDL_INIT_VIDEO); // Start video to show the image
 
   SDL_Window* window = SDL_CreateWindow("Original and Edited View", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-					g_viewer.image->surface->w + g_viewer.image->original->w,
-					max(g_viewer.image->surface->h, g_viewer.image->original->h),
+					g_image_viewer.image->surface->w + g_image_viewer.image->original->w,
+					max(g_image_viewer.image->surface->h, g_image_viewer.image->original->h),
 					SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
 
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
 
   // Using streaming textures to update frequently
   SDL_Texture* texture_original = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
-						    g_viewer.image->original->w, g_viewer.image->original->h);
+						    g_image_viewer.image->original->w, g_image_viewer.image->original->h);
   SDL_Texture* texture_edited = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
-						  g_viewer.image->surface->w, g_viewer.image->surface->h);
+						  g_image_viewer.image->surface->w, g_image_viewer.image->surface->h);
 
-  SDL_UpdateTexture(texture_original, NULL, g_viewer.image->original->pixels, g_viewer.image->original->pitch);
-  SDL_UpdateTexture(texture_edited, NULL, g_viewer.image->surface->pixels, g_viewer.image->surface->pitch);
+  SDL_UpdateTexture(texture_original, NULL, g_image_viewer.image->original->pixels, g_image_viewer.image->original->pitch);
+  SDL_UpdateTexture(texture_edited, NULL, g_image_viewer.image->surface->pixels, g_image_viewer.image->surface->pitch);
 
-  SDL_Rect original_dest_rect = {0, 0, g_viewer.image->original->w, g_viewer.image->original->h};
-  SDL_Rect edited_dest_rect = {g_viewer.image->original->w, 0, g_viewer.image->surface->w, g_viewer.image->surface->h};
+  SDL_Rect original_dest_rect = {0, 0, g_image_viewer.image->original->w, g_image_viewer.image->original->h};
+  SDL_Rect edited_dest_rect = {g_image_viewer.image->original->w, 0, g_image_viewer.image->surface->w, g_image_viewer.image->surface->h};
 
 
-  int current_w = g_viewer.image->surface->w + g_viewer.image->original->w;
-  int current_h = max(g_viewer.image->surface->h, g_viewer.image->original->h);
+  int current_w = g_image_viewer.image->surface->w + g_image_viewer.image->original->w;
+  int current_h = max(g_image_viewer.image->surface->h, g_image_viewer.image->original->h);
 
   SDL_Event event;
-  while (!g_viewer.should_quit) {
+  while (!g_image_viewer.should_quit) {
 
     while (SDL_PollEvent(&event)) {
       if (event.type == SDL_QUIT) {
-	g_viewer.should_quit = 1;
-	g_viewer.close_correctly = 0;
+	g_image_viewer.should_quit = 1;
+	g_image_viewer.close_correctly = 0;
       }
     }
 
-    pthread_mutex_lock(&g_viewer.mutex);
-    if (g_viewer.has_changed) { // Checking updates in the image by the functions
-      Image* current_image = g_viewer.image;
+    pthread_mutex_lock(&g_image_viewer.mutex);
+    if (g_image_viewer.has_changed) { // Checking updates in the image by the functions
+      Image* current_image = g_image_viewer.image;
 
       // Check if the image dimensions have changed, if so, resize the window
       if ((current_image->surface->w + current_image->original->w) != current_w ||
@@ -572,15 +574,15 @@ void* viewer_thread_func(void* arg) {
 
 
 	// Update squares
-	original_dest_rect = (SDL_Rect){0, 0, g_viewer.image->original->w, g_viewer.image->original->h};
-	edited_dest_rect = (SDL_Rect){g_viewer.image->original->w, 0, g_viewer.image->surface->w, g_viewer.image->surface->h};
+	original_dest_rect = (SDL_Rect){0, 0, g_image_viewer.image->original->w, g_image_viewer.image->original->h};
+	edited_dest_rect = (SDL_Rect){g_image_viewer.image->original->w, 0, g_image_viewer.image->surface->w, g_image_viewer.image->surface->h};
       }
 
       SDL_UpdateTexture(texture_original, NULL, current_image->original->pixels, current_image->original->pitch);
-      SDL_UpdateTexture(texture_edited, NULL, current_image->surface->pixels, g_viewer.image->surface->pitch);
-      g_viewer.has_changed = 0; // Reset the flag
+      SDL_UpdateTexture(texture_edited, NULL, current_image->surface->pixels, g_image_viewer.image->surface->pitch);
+      g_image_viewer.has_changed = 0; // Reset the flag
     }
-    pthread_mutex_unlock(&g_viewer.mutex);
+    pthread_mutex_unlock(&g_image_viewer.mutex);
 
     SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, texture_original, NULL, &original_dest_rect);
@@ -602,7 +604,7 @@ void* viewer_thread_func(void* arg) {
 // Shows the image by calling a thread to do so, doing this prevents the terminal to freeze
 int sclimage_show(Image* image, int argc, char* argv[]) {
 
-  if (g_viewer.is_running) {
+  if (g_image_viewer.is_running) {
     return SCLIMAGE_ALREADY_SHOWING;
   }
 
@@ -610,32 +612,229 @@ int sclimage_show(Image* image, int argc, char* argv[]) {
     return SCLIMAGE_SHOW_NULL;
   }
 
-  g_viewer.image = image;
-  g_viewer.should_quit = 0;
-  g_viewer.has_changed = 1;
-  g_viewer.close_correctly = 0;
-  pthread_mutex_init(&g_viewer.mutex, NULL);
+  g_image_viewer.image = image;
+  g_image_viewer.should_quit = 0;
+  g_image_viewer.has_changed = 1;
+  g_image_viewer.close_correctly = 0;
+  pthread_mutex_init(&g_image_viewer.mutex, NULL);
 
-  if (pthread_create(&g_viewer.thread_id, NULL, viewer_thread_func, NULL) != 0) {
+  if (pthread_create(&g_image_viewer.thread_id, NULL, viewer_image_thread_func, NULL) != 0) {
     return SCLIMAGE_SHOW_THREAD_ERROR;
   }
 
-  g_viewer.is_running = 1;
+  g_image_viewer.is_running = 1;
   return 0;
 }
 
 
 // Stop showing the image (ends the showing thread)
 int sclimage_hide(Image* image, int argc, char* argv[]) {
-  if (!g_viewer.is_running) {
+  if (!g_image_viewer.is_running) {
     return 0;
   }
 
-  g_viewer.should_quit = 1;
-  pthread_join(g_viewer.thread_id, NULL);
+  g_image_viewer.should_quit = 1;
+  pthread_join(g_image_viewer.thread_id, NULL);
 
-  pthread_mutex_destroy(&g_viewer.mutex);
-  g_viewer.is_running = 0;
-  g_viewer.close_correctly = 1;
+  pthread_mutex_destroy(&g_image_viewer.mutex);
+  g_image_viewer.is_running = 0;
+  g_image_viewer.close_correctly = 1;
   return 0;
+}
+
+
+// Protótipos das funções auxiliares
+void calculate_histogram(SDL_Surface* surface, unsigned int histogram[256]);
+unsigned int normalize_histogram(unsigned int raw_histogram[256], int normalized_histogram[256], int graph_height);
+SDL_Texture* create_text_texture(SDL_Renderer* renderer, TTF_Font* font, const char* text, SDL_Color color);
+
+
+void* viewer_histogram_thread_func(void* arg);
+
+// Shows the image by calling a thread to do so, doing this prevents the terminal to freeze
+int sclimage_histogram(Image* image, int argc, char* argv[]) {
+
+  if (g_histogram_viewer.is_running) {
+    return SCLIMAGE_ALREADY_SHOWING;
+  }
+
+  if (image == NULL || image->surface == NULL) {
+    return SCLIMAGE_SHOW_NULL;
+  }
+
+  g_histogram_viewer.image = image;
+  g_histogram_viewer.should_quit = 0;
+  g_histogram_viewer.has_changed = 1;
+  g_histogram_viewer.close_correctly = 0;
+  pthread_mutex_init(&g_histogram_viewer.mutex, NULL);
+
+  if (pthread_create(&g_histogram_viewer.thread_id, NULL, viewer_histogram_thread_func, NULL) != 0) {
+    return SCLIMAGE_SHOW_THREAD_ERROR;
+  }
+
+  g_histogram_viewer.is_running = 1;
+  return 0;
+}
+
+
+void* viewer_histogram_thread_func(void* arg) {
+
+    // --- INICIALIZAÇÃO ---
+    SDL_Init(SDL_INIT_VIDEO);
+    IMG_Init(IMG_INIT_JPG | IMG_INIT_PNG);
+    TTF_Init();
+
+    // --- CARREGAMENTO E CÁLCULO ---
+    SDL_Surface* surface = g_histogram_viewer.image->surface;
+
+    const int GRAPH_BASE_WIDTH = 256;
+    const int GRAPH_BASE_HEIGHT = 200;
+    const int SCALE_X = 2;
+    const int MARGIN_TOP = 40, MARGIN_BOTTOM = 40, MARGIN_LEFT = 60, MARGIN_RIGHT = 20;
+    const int GRAPH_WIDTH = GRAPH_BASE_WIDTH * SCALE_X;
+    const int GRAPH_HEIGHT = GRAPH_BASE_HEIGHT;
+    const int WINDOW_WIDTH = GRAPH_WIDTH + MARGIN_LEFT + MARGIN_RIGHT;
+    const int WINDOW_HEIGHT = GRAPH_HEIGHT + MARGIN_TOP + MARGIN_BOTTOM;
+
+    unsigned int raw_histogram[256];
+    int normalized_histogram[256];
+
+    calculate_histogram(surface, raw_histogram);
+    unsigned int max_pixel_count = normalize_histogram(raw_histogram, normalized_histogram, GRAPH_HEIGHT);
+    //    SDL_FreeSurface(surface);
+
+    // --- JANELA, RENDERER E FONTE ---
+    SDL_Window* window = SDL_CreateWindow("Histograma Estilizado", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_SHOWN);
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    TTF_Font* font = TTF_OpenFont("/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf", 16);
+    if (!font) font = TTF_OpenFont("font.ttf", 16);
+
+    // --- CRIAÇÃO DOS RÓTULOS DE TEXTO ---
+    SDL_Color text_color = {0, 0, 0, 255};
+
+    // Armazena as strings dos rótulos em buffers
+    char max_text[20], mid_text[20], zero_text[] = "0";
+    char x0_text[] = "0", x128_text[] = "128", x255_text[] = "255";
+    snprintf(max_text, 20, "%u", max_pixel_count);
+    snprintf(mid_text, 20, "%u", max_pixel_count / 2);
+
+    // Cria as texturas a partir dos buffers de string
+    SDL_Texture* label_max_y = create_text_texture(renderer, font, max_text, text_color);
+    SDL_Texture* label_mid_y = create_text_texture(renderer, font, mid_text, text_color);
+    SDL_Texture* label_0_y = create_text_texture(renderer, font, zero_text, text_color);
+    SDL_Texture* label_0_x = create_text_texture(renderer, font, x0_text, text_color);
+    SDL_Texture* label_128_x = create_text_texture(renderer, font, x128_text, text_color);
+    SDL_Texture* label_255_x = create_text_texture(renderer, font, x255_text, text_color);
+
+    // --- POSICIONAMENTO DOS RÓTULOS (CORRIGIDO) ---
+    SDL_Rect r_max_y, r_mid_y, r_0_y, r_0_x, r_128_x, r_255_x;
+
+    // Usa as strings originais para calcular o tamanho
+    TTF_SizeText(font, max_text, &r_max_y.w, &r_max_y.h);
+    TTF_SizeText(font, mid_text, &r_mid_y.w, &r_mid_y.h);
+    TTF_SizeText(font, zero_text, &r_0_y.w, &r_0_y.h);
+    TTF_SizeText(font, x0_text, &r_0_x.w, &r_0_x.h);
+    TTF_SizeText(font, x128_text, &r_128_x.w, &r_128_x.h);
+    TTF_SizeText(font, x255_text, &r_255_x.w, &r_255_x.h);
+
+    // Define as coordenadas (x, y)
+    r_max_y.x = MARGIN_LEFT - r_max_y.w - 5; r_max_y.y = MARGIN_TOP - (r_max_y.h / 2);
+    r_mid_y.x = MARGIN_LEFT - r_mid_y.w - 5; r_mid_y.y = MARGIN_TOP + (GRAPH_HEIGHT / 2) - (r_mid_y.h / 2);
+    r_0_y.x = MARGIN_LEFT - r_0_y.w - 5;   r_0_y.y = MARGIN_TOP + GRAPH_HEIGHT - (r_0_y.h / 2);
+
+    r_0_x.x = MARGIN_LEFT; r_0_x.y = MARGIN_TOP + GRAPH_HEIGHT + 5;
+    r_128_x.x = MARGIN_LEFT + (GRAPH_WIDTH / 2) - (r_128_x.w / 2); r_128_x.y = MARGIN_TOP + GRAPH_HEIGHT + 5;
+    r_255_x.x = MARGIN_LEFT + GRAPH_WIDTH - r_255_x.w; r_255_x.y = MARGIN_TOP + GRAPH_HEIGHT + 5;
+
+    // --- LOOP DE RENDERIZAÇÃO ---
+    int quit = 0;
+    SDL_Event event;
+    while (!quit) {
+        while (SDL_PollEvent(&event)) { if (event.type == SDL_QUIT) quit = 1; }
+
+        // Gradiente do fundo
+        for (int y = 0; y < WINDOW_HEIGHT; ++y) {
+	  Uint8 c = 255;// - (Uint8)(y * (20.0 / WINDOW_HEIGHT));
+            SDL_SetRenderDrawColor(renderer, c, c, c, 255);
+            SDL_RenderDrawLine(renderer, 0, y, WINDOW_WIDTH, y);
+        }
+        // Desenho dos eixos
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderDrawLine(renderer, MARGIN_LEFT, MARGIN_TOP, MARGIN_LEFT, MARGIN_TOP + GRAPH_HEIGHT);
+        SDL_RenderDrawLine(renderer, MARGIN_LEFT, MARGIN_TOP + GRAPH_HEIGHT, MARGIN_LEFT + GRAPH_WIDTH, MARGIN_TOP + GRAPH_HEIGHT);
+        // Barras do histograma
+        for (int i = 0; i < GRAPH_BASE_WIDTH; ++i) {
+            int bar_height = normalized_histogram[i];
+            if (bar_height > 0) {
+                SDL_Rect bar_rect = {MARGIN_LEFT + (i * SCALE_X), MARGIN_TOP + GRAPH_HEIGHT - bar_height, SCALE_X, bar_height};
+                /* Uint8 r = 100 + (bar_height * 155 / GRAPH_HEIGHT); */
+                /* Uint8 b = 255 - (bar_height * 155 / GRAPH_HEIGHT); */
+                SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+                SDL_RenderFillRect(renderer, &bar_rect);
+            }
+        }
+        // Desenho dos rótulos
+        SDL_RenderCopy(renderer, label_max_y, NULL, &r_max_y);
+        SDL_RenderCopy(renderer, label_mid_y, NULL, &r_mid_y);
+        SDL_RenderCopy(renderer, label_0_y, NULL, &r_0_y);
+        SDL_RenderCopy(renderer, label_0_x, NULL, &r_0_x);
+        SDL_RenderCopy(renderer, label_128_x, NULL, &r_128_x);
+        SDL_RenderCopy(renderer, label_255_x, NULL, &r_255_x);
+
+        SDL_RenderPresent(renderer);
+        SDL_Delay(30);
+    }
+
+    // --- LIMPEZA ---
+    SDL_DestroyTexture(label_max_y);
+    SDL_DestroyTexture(label_mid_y);
+    // ... (destruir todas as outras texturas de rótulo) ...
+    TTF_CloseFont(font);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    TTF_Quit();
+    IMG_Quit();
+    SDL_Quit();
+
+    return NULL;
+}
+
+
+void calculate_histogram(SDL_Surface* surface, unsigned int histogram[256]) {
+    memset(histogram, 0, 256 * sizeof(unsigned int));
+    SDL_LockSurface(surface);
+    Uint32* pixels = (Uint32*)surface->pixels;
+    for (int i = 0; i < surface->w * surface->h; ++i) {
+        Uint8 r, g, b, a;
+        SDL_GetRGBA(pixels[i], surface->format, &r, &g, &b, &a);
+        Uint8 luminance = (Uint8)(0.299 * r + 0.587 * g + 0.114 * b);
+        histogram[luminance]++;
+    }
+    SDL_UnlockSurface(surface);
+}
+
+unsigned int normalize_histogram(unsigned int raw_histogram[256], int normalized_histogram[256], int graph_height) {
+    unsigned int max_value = 0;
+    for (int i = 0; i < 256; ++i) {
+        if (raw_histogram[i] > max_value) max_value = raw_histogram[i];
+    }
+    if (max_value == 0) {
+        memset(normalized_histogram, 0, 256 * sizeof(int));
+        return 0;
+    }
+    for (int i = 0; i < 256; ++i) {
+        normalized_histogram[i] = (int)(((double)raw_histogram[i] / max_value) * graph_height);
+    }
+    return max_value;
+}
+
+SDL_Texture* create_text_texture(SDL_Renderer* renderer, TTF_Font* font, const char* text, SDL_Color color) {
+    SDL_Surface* text_surface = TTF_RenderText_Blended(font, text, color);
+    if (!text_surface) {
+        printf("Erro ao renderizar texto: %s\n", TTF_GetError());
+        return NULL;
+    }
+    SDL_Texture* text_texture = SDL_CreateTextureFromSurface(renderer, text_surface);
+    SDL_FreeSurface(text_surface);
+    return text_texture;
 }

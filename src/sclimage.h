@@ -7,6 +7,7 @@
 
 #include <SDL2/SDL.h> // Library used to image handle
 #include <SDL2/SDL_image.h> // <-----'
+#include <SDL2/SDL_ttf.h> // <--- Used to create the histogram
 
 #include <readline/readline.h> // Library to CLI
 #include <readline/history.h> // <-----'
