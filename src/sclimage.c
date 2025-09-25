@@ -234,6 +234,7 @@ int sclimage_help(Image* img, int argc, char* argv[]) {
 	 "  grayscale                - Applies the grayscale filter to image.\n"
 	 "  quantization <shades>    - Quantizes the image to only use <shades> shades.\n"
 	 "  negative                 - Applies the negative filter to the image.\n"
+	 "  brightness <b>           - Adjust the brightness by a <b> value in range [-255,255].\n"
 	 "  hflip                    - Flips the image horizontally.\n"
 	 "  vflip                    - Flips the image vertically.\n"
 	 "  rotate                   - Rotate the image clockwise, use the option -a (or --counter) to flip it ocunter-clockwise.\n"
@@ -467,7 +468,7 @@ int sclimage_brightness(Image* image, int argc, char* argv[]){
     return SCLIMAGE_BRIGHTNESS_ARGUMENT_MISSING;
   }
 
-  int scalar = atoi(argv[1]);
+  int scalar = max(-255, min(255, atoi(argv[1])));
   SDL_Surface* surface = image->surface;
   SDL_LockSurface(surface);
 
