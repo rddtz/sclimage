@@ -15,6 +15,7 @@ int sclimage_quantization(Image* image, int argc, char* argv[]);
 int sclimage_histogram(Image* image, int argc, char* argv[]);
 int sclimage_exit(Image* image, int argc, char* argv[]);
 int sclimage_brightness(Image* image, int argc, char* argv[]);
+int sclimage_contrast(Image* image, int argc, char* argv[]);
 
 ViewerState g_image_viewer = {0}; // Global viewer state
 ViewerState g_histogram_viewer = {0}; // Global viewer state
@@ -38,6 +39,7 @@ Command command_table[] = {
   {"quantization", sclimage_quantization},
   {"histogram", sclimage_histogram},
   {"brightness", sclimage_brightness},
+  {"contrast", sclimage_contrast},
   {"show", sclimage_show},
   {"view", sclimage_show},
   {"hide", sclimage_hide},
@@ -359,6 +361,46 @@ int sclimage_brightness(Image* image, int argc, char* argv[]){
     r = min(255, max(0, r + scalar));
     g = min(255, max(0, g + scalar));
     b = min(255, max(0, b + scalar));
+
+    pixels[i] = setRGBA(r, g, b, a);
+
+    g_image_viewer.has_changed = 1;
+    pthread_mutex_unlock(&g_image_viewer.mutex);
+  }
+
+  SDL_UnlockSurface(surface);
+
+  return 0;
+}
+
+
+// Adjust contrast of an image
+// Is this right?
+int sclimage_contrast(Image* image, int argc, char* argv[]){
+
+  if(argc <= 1){
+    return SCLIMAGE_CONTRAST_ARGUMENT_MISSING;
+  }
+
+  int scalar = atoi(argv[1]);
+  SDL_Surface* surface = image->surface;
+  SDL_LockSurface(surface);
+
+  Uint32* pixels = (Uint32*)surface->pixels;
+  int pixel_count = surface->w * surface->h;
+
+  for (int i = 0; i < pixel_count; i++) {
+    pthread_mutex_lock(&g_image_viewer.mutex);
+
+    Uint32 pixel = pixels[i];
+    Uint8 r, g, b, a;
+
+    getRBGA(pixel, &r, &g, &b, &a);
+
+    r = min(255, max(0, r*scalar));
+    g = min(255, max(0, g*scalar));
+    b = min(255, max(0, b*scalar));
+    //    printf("(%d, %d, %d)\n", r, g, b);
 
     pixels[i] = setRGBA(r, g, b, a);
 

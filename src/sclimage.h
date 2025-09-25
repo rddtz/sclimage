@@ -34,6 +34,7 @@
 #define SCLIMAGE_SHOW_THREAD_ERROR -9
 #define SCLIMAGE_QUANTIZATION_ARGUMENT_MISSING -10
 #define SCLIMAGE_BRIGHTNESS_ARGUMENT_MISSING -11
+#define SCLIMAGE_CONTRAST_ARGUMENT_MISSING -12
 #define SCLIMAGE_OK 0
 
 
@@ -179,6 +180,10 @@ int sclimage_error(int status){
 
   case SCLIMAGE_BRIGHTNESS_ARGUMENT_MISSING:
     snprintf(error_msg, SCLIMAGE_MAX_LINE_LEN, "Error: brightness scalar not informed, try again with 'brightness <scalar>'.\n");
+    break;
+
+  case SCLIMAGE_CONTRAST_ARGUMENT_MISSING:
+    snprintf(error_msg, SCLIMAGE_MAX_LINE_LEN, "Error: contrast scalar not informed, try again with 'contrast <scalar>'.\n");
     break;
   }
 
