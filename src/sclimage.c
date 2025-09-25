@@ -11,6 +11,7 @@ int sclimage_save(Image* image, int argc, char* argv[]);
 int sclimage_grayscale(Image* image, int argc, char* argv[]);
 int sclimage_negative(Image* image, int argc, char* argv[]);
 int sclimage_restart(Image* image, int argc, char* argv[]);
+int sclimage_rotate(Image* image, int argc, char* argv[]);
 int sclimage_quantization(Image* image, int argc, char* argv[]);
 int sclimage_histogram(Image* image, int argc, char* argv[]);
 int sclimage_exit(Image* image, int argc, char* argv[]);
@@ -36,8 +37,9 @@ Command command_table[] = {
   {"grayscale", sclimage_grayscale},
   {"negative", sclimage_negative},
   {"restart", sclimage_restart},
+  {"rotate", sclimage_rotate},
   {"quantization", sclimage_quantization},
-  {"histogram", sclimage_histogram},
+  {"histogram", sclimage_histogram}, // subcommand with more arguments
   {"brightness", sclimage_brightness},
   {"contrast", sclimage_contrast},
   {"show", sclimage_show},
@@ -73,6 +75,33 @@ char* command_generator(const char* text, int state) {
   return NULL;
 }
 
+const char* rotate_options[] = {
+    "--clockwise",
+    "--counter",
+    "-a",
+    NULL // O final da lista deve ser NULL
+};
+
+// Gerador que encontra correspondências na lista 'rotate_options'
+char* rotate_option_generator(const char* text, int state) {
+    static int list_index, len;
+    const char* name;
+
+    if (!state) {
+        list_index = 0;
+        len = strlen(text);
+    }
+
+    // Procura o próximo nome na lista que corresponde ao texto
+    while ((name = rotate_options[list_index++])) {
+        if (strncmp(name, text, len) == 0) {
+            return strdup(name);
+        }
+    }
+
+    return NULL; // Nenhuma outra correspondência encontrada
+}
+
 // This calls the autocomplete depending on the CLI state
 char** smart_completer(const char* text, int start, int end) {
   // This prevents readline from trying to complete from a static list by default.
@@ -92,6 +121,11 @@ char** smart_completer(const char* text, int start, int end) {
     free(line_copy);
     // Use readline built-in filename completer.
     return rl_completion_matches(text, rl_filename_completion_function);
+  }
+
+  if (command && strcmp(command, "rotate") == 0) {
+    free(line_copy);
+    return rl_completion_matches(text, rotate_option_generator);
   }
 
   // If the command is something else, return.
@@ -202,6 +236,7 @@ int sclimage_help(Image* img, int argc, char* argv[]) {
 	 "  negative                 - Applies the negative filter to the image.\n"
 	 "  hflip                    - Flips the image horizontally.\n"
 	 "  vflip                    - Flips the image vertically.\n"
+	 "  rotate                   - Rotate the image clockwise, use the option -a (or --counter) to flip it ocunter-clockwise.\n"
 	 "  exit                     - Exits the shell.\n"
 	 "  quit                     - Same as exit.\n"
 	 "  help                     - Shows this help message.\n");
@@ -240,8 +275,6 @@ int sclimage_hflip(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-
-// Flip the image vertically
 int sclimage_vflip(Image* image, int argc, char* argv[]){
 
   SDL_Surface* surface = image->surface;
@@ -268,6 +301,97 @@ int sclimage_vflip(Image* image, int argc, char* argv[]){
 
   return 0;
 }
+
+
+
+// rotate the image clockwise
+int sclimage_rotate(Image* image, int argc, char* argv[]){
+
+  SDL_Surface* surface = image->surface;
+
+
+  int src_w = surface->w;
+  int src_h = surface->h;
+
+  int dest_w = src_h;
+  int dest_h = src_w;
+
+  int direction = 1;
+  int opt;
+
+    // --- 1. Define the Long Options ---
+  static struct option long_options[] = {
+    // name,       has_arg,            flag, val
+    {"clockwise",         no_argument,   NULL, 'c'},
+      {"counter",  no_argument,  NULL, 'a'},
+	{0, 0, 0, 0} // Marks the end of the array
+  };
+
+  optind = 1;
+  // --- 2. The getopt_long() Loop ---
+  // The short option string "o:O:g" is still used for short options.
+  while ((opt = getopt_long(argc, argv, "ca", long_options, NULL)) != -1) {
+    switch (opt) {
+    case 'c':
+      direction = 1;
+      break;
+    case 'a':
+      direction = -1;
+      break;
+    }
+  }
+
+  printf("%d\n", direction);
+
+  // new surface with the new dimensions
+  SDL_Surface* dest = SDL_CreateRGBSurfaceWithFormat(0, dest_w, dest_h,
+                                                     surface->format->BitsPerPixel,
+                                                     surface->format->format);
+  if (!dest) {
+    fprintf(stderr, "Erro ao criar superfície de destino: %s\n", SDL_GetError());
+    return SCLIMAGE_LOAD_ERROR;
+  }
+
+  SDL_LockSurface(surface);
+  SDL_LockSurface(dest);
+
+  Uint32* src_pixels = (Uint32*)surface->pixels;
+  Uint32* dest_pixels = (Uint32*)dest->pixels;
+
+  // 3. Itera sobre cada pixel da imagem ORIGINAL (mapeamento direto)
+  for (int sy = 0; sy < src_h; ++sy) {
+    for (int sx = 0; sx < src_w; ++sx) {
+      pthread_mutex_lock(&g_image_viewer.mutex);
+      // 4. Calcula a nova posição do pixel na imagem de destino
+
+      int dx = 0;
+      int dy = 0;
+
+      if(direction == -1){
+	dx = sy;
+	dy = (src_w - 1) - sx;
+      } else {
+	dx = (src_h - 1) - sy;
+	dy = sx;
+      }
+
+      // 5. Copia o pixel
+      dest_pixels[dy * dest_w + dx] = src_pixels[sy * src_w + sx];
+
+      g_image_viewer.has_changed = 1;
+      pthread_mutex_unlock(&g_image_viewer.mutex);
+    }
+  }
+
+  pthread_mutex_lock(&g_image_viewer.mutex);
+  image->surface = dest;
+  SDL_FreeSurface(surface);
+  g_image_viewer.has_changed = 1;
+  pthread_mutex_unlock(&g_image_viewer.mutex);
+
+  return 0;
+}
+
 
 
 // Apply negative filter to the image
@@ -335,7 +459,7 @@ int sclimage_grayscale(Image* image, int argc, char* argv[]){
   return 0;
 }
 
-// Adjust image brightness of an image
+// Adjust brightness of an image
 // Is this right?
 int sclimage_brightness(Image* image, int argc, char* argv[]){
 
