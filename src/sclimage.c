@@ -1,3 +1,13 @@
+// T2
+// ~~~Brilho ----.
+// ~~~Contraste --'---> perguntar se é pra ser cumulativo, ou aplicar sempre em cima da original
+// Convolução
+// resize
+// ~~~ flip
+// histogram show
+// histogram match
+// histogram equalizate
+
 #include "sclimage.h"
 
 // Signatures for the functions of the application
@@ -343,8 +353,6 @@ int sclimage_rotate(Image* image, int argc, char* argv[]){
     }
   }
 
-  printf("%d\n", direction);
-
   // new surface with the new dimensions
   SDL_Surface* dest = SDL_CreateRGBSurfaceWithFormat(0, dest_w, dest_h,
                                                      surface->format->BitsPerPixel,
@@ -426,6 +434,18 @@ int sclimage_negative(Image* image, int argc, char* argv[]){
 
   return 0;
 }
+
+/* // Apply negative filter to the image */
+/* int sclimage_gaussian(Image* image, int argc, char* argv[]){ */
+
+/*   flaot gaussian_filter[9] = {0.0625, 0.125, 0.0625, */
+/* 			      0.125,  0.25,  0.125, */
+/* 			      0.0625, 0.125, 0.0625}; */
+
+/*   sclimage_convolute(image, gaussian_filter, 3); */
+
+/*   return 0; */
+/* } */
 
 
 // Apply the grayscale filter to the image
