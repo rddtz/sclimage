@@ -69,7 +69,7 @@ typedef struct {
 
 
 // My pixel decoder
-void getRBGA(Uint32 pixel, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 *a){
+void getRGBA(Uint32 pixel, Uint8 *r, Uint8 *g, Uint8 *b, Uint8 *a){
 
   Uint8 mask = 0xFF;
   *r = (pixel & mask);
@@ -119,13 +119,86 @@ int is_grayscale(Image* image){
     Uint32 pixel = pixels[i];
     Uint8 r, g, b, a;
 
-    getRBGA(pixel, &r, &g, &b, &a);
+    getRGBA(pixel, &r, &g, &b, &a);
     if(r != b || r != g || b != g){
       return 0; // Is not in grayscale
     }
   }
 
   return 1; // is gray scale
+}
+
+void calculate_HM(int *HM, int *histogram_sum, int *histogram_sum_target){
+
+  for (int i = 0; i < SCLIMAGE_GRAYSCALE_RANGE; i++) {
+    double minD = 256;
+    int best = 0;
+
+    for (int t = 0; t < SCLIMAGE_GRAYSCALE_RANGE; t++) {
+      double distance = abs(histogram_sum[i] - histogram_sum_target[t]);
+
+      if (distance < minD){
+	minD = distance;
+	best = t;
+      }
+    }
+
+    HM[i] = best;
+  }
+
+}
+
+void cumulative_histogram(int *histogram, int *histogram_sum, double scaling_factor){
+
+  histogram_sum[0] = histogram[0];
+
+  for (int i = 1; i < SCLIMAGE_GRAYSCALE_RANGE; i++) {
+    histogram_sum[i] = histogram_sum[i-1] + histogram[i]; // Calculate the histogram
+  }
+
+  for (int i = 0; i < SCLIMAGE_GRAYSCALE_RANGE; i++) {
+    histogram_sum[i] = histogram_sum[i] * scaling_factor; // Calculate the histogram
+  }
+
+}
+
+// Calculate the histogram for grayscale image
+void calculate_histogram(SDL_Surface* surface, int *histogram, char c) {
+
+  memset(histogram, 0, SCLIMAGE_GRAYSCALE_RANGE * sizeof(int));
+
+  SDL_LockSurface(surface);
+  Uint32* pixels = (Uint32*)surface->pixels;
+  int v = 0;
+
+  for (int i = 0; i < surface->w * surface->h; i++) {
+
+    Uint8 r, g, b, a;
+    getRGBA(pixels[i], &r, &g, &b, &a);
+    /* printf("P(%d) = %d\n", i, pixels[i]); */
+
+    switch (c) {
+    case 'r':
+      v = r;
+      break;
+    case 'g':
+      v = g;
+      break;
+    case 'b':
+      v = b;
+      break;
+    default:
+      v = (Uint8)(0.299 * r + 0.587 * g + 0.114 * b);
+      break;
+    }
+
+    /* printf("V: %d\n", v); */
+    histogram[v]++;
+    /* printf("Done\n"); */
+  }
+
+  SDL_UnlockSurface(surface);
+
 }
 
 // Print error mesasges and returns if program needs to be closed
